@@ -2,3 +2,5 @@ numpy
 pandas
 polars
 yfinance
+matplotlib
+scipy
