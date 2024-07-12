@@ -55,10 +55,10 @@ def linear_regression_channel(data, window, offset=0):
         intercepts.append(intercept)
     slopes = np.array(slopes)
     intercepts = np.array(intercepts)
-    middle = intercepts + slopes * (window - 1)
+    middle = pd.Series(intercepts + slopes * (window - 1), index=data.index[window-1:])
     std_dev = data.rolling(window=window).std().shift(offset)
-    upper = middle[:len(std_dev)] + std_dev
-    lower = middle[:len(std_dev)] - std_dev
+    upper = middle + std_dev
+    lower = middle - std_dev
     return pd.DataFrame({'upper': upper, 'middle': middle, 'lower': lower})
 
 def linear_regression_curve(data, window, offset=0):
