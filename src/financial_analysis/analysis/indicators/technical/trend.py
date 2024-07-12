@@ -56,8 +56,9 @@ def linear_regression_channel(data, window, offset=0):
     slopes = np.array(slopes)
     intercepts = np.array(intercepts)
     middle = intercepts + slopes * (window - 1)
-    upper = middle + data.rolling(window=window).std().shift(offset)
-    lower = middle - data.rolling(window=window).std().shift(offset)
+    std_dev = data.rolling(window=window).std().shift(offset)
+    upper = middle[:len(std_dev)] + std_dev
+    lower = middle[:len(std_dev)] - std_dev
     return pd.DataFrame({'upper': upper, 'middle': middle, 'lower': lower})
 
 def linear_regression_curve(data, window, offset=0):
@@ -132,28 +133,28 @@ def parabolic_sar(data, step=0.02, max_step=0.2, offset=0):
     sar = np.zeros(len(data))
     trend = 1
     af = step
-    ep = high[0]
-    sar[0] = low[0]
+    ep = high.iloc[0]
+    sar[0] = low.iloc[0]
 
     for i in range(1, len(data)):
         sar[i] = sar[i-1] + af * (ep - sar[i-1])
         if trend == 1:
-            if high[i] > ep:
-                ep = high[i]
+            if high.iloc[i] > ep:
+                ep = high.iloc[i]
                 af = min(af + step, max_step)
-            if low[i] < sar[i]:
+            if low.iloc[i] < sar[i]:
                 trend = -1
                 sar[i] = ep
-                ep = low[i]
+                ep = low.iloc[i]
                 af = step
         else:
-            if low[i] < ep:
-                ep = low[i]
+            if low.iloc[i] < ep:
+                ep = low.iloc[i]
                 af = min(af + step, max_step)
-            if high[i] > sar[i]:
+            if high.iloc[i] > sar[i]:
                 trend = 1
                 sar[i] = ep
-                ep = high[i]
+                ep = high.iloc[i]
                 af = step
 
     return pd.Series(sar, index=data.index).shift(offset)
