@@ -20,8 +20,8 @@ class TestYahooFetchers(unittest.TestCase):
         data = download_multiple_tickers(['AAPL', 'MSFT'], '2020-01-01', '2020-01-10')
         self.assertIsInstance(data, pd.DataFrame)
         self.assertFalse(data.empty)
-        self.assertIn('AAPL', data.columns.get_level_values(0))
-        self.assertIn('MSFT', data.columns.get_level_values(0))
+        self.assertIn('AAPL', data.columns.get_level_values(1))
+        self.assertIn('MSFT', data.columns.get_level_values(1))
 
     def test_save_data_to_file_csv(self):
         data = download_historical_data('AAPL', '2020-01-01', '2020-01-10')
