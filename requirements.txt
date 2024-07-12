@@ -4,3 +4,4 @@ polars
 yfinance
 matplotlib
 scipy
+# Add any additional dependencies here
