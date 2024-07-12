@@ -1,12 +1,13 @@
 import unittest
 import pandas as pd
-from datetime import date, timedelta
+
 from financial_analysis.data.fetchers.yahoo import (
     download_historical_data,
     download_multiple_tickers,
     save_data_to_file,
     update_data_file
 )
+
 
 class TestYahooFetchers(unittest.TestCase):
 
@@ -47,6 +48,7 @@ class TestYahooFetchers(unittest.TestCase):
         update_data_file('AAPL', 'test_update_data.parquet', 'parquet')
         updated_data = pd.read_parquet('test_update_data.parquet')
         self.assertFalse(updated_data.empty)
+
 
 if __name__ == '__main__':
     unittest.main()
