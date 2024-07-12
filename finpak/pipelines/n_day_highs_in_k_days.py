@@ -16,7 +16,7 @@ def main():
     for ticker in tickers:
         ticker_data = data['Close'][ticker]
         result = n_day_high_in_last_k_days(ticker_data.values, n, k)
-        count = result.sum()
+        count = result[-k:].sum()
         print(f"{ticker} saw an N-day high {count} times in the past {k} days.")
 
 
