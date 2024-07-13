@@ -60,7 +60,8 @@ def download_historical_data(ticker, start_date, end_date, interval='1d', file_f
         return existing_data
 
     data = yf.download(ticker, start=start_date, end=end_date, interval=interval)
-    save_data_to_file(data, ticker, file_format)
+    if not data.empty:
+        save_data_to_file(data, ticker, file_format)
     return data
 
 
@@ -91,7 +92,8 @@ def save_data_to_file(data, ticker, file_format='csv'):
     file_format (str): The file format ('csv' or 'parquet').
     """
     folder_path = os.path.join('data_store', ticker)
-    os.makedirs(folder_path, exist_ok=True)
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
     filename = os.path.join(folder_path, f"{date.today().strftime('%Y-%m-%d')}.{file_format}")
 
     if file_format == 'csv':
@@ -120,8 +122,10 @@ def update_data_file(ticker, file_format='csv'):
         last_date = existing_data.index[-1]
         new_data = download_historical_data(ticker, start_date=last_date.strftime('%Y-%m-%d'), end_date=date.today().strftime('%Y-%m-%d'), file_format=file_format)
         updated_data = pd.concat([existing_data, new_data]).drop_duplicates()
-        save_data_to_file(updated_data, ticker, file_format)
+        if not updated_data.empty:
+            save_data_to_file(updated_data, ticker, file_format)
     else:
         new_data = download_historical_data(ticker, start_date='1900-01-01', end_date=date.today().strftime('%Y-%m-%d'), file_format=file_format)
-        save_data_to_file(new_data, ticker, file_format)
+        if not new_data.empty:
+            save_data_to_file(new_data, ticker, file_format)
 
