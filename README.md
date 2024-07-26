@@ -56,72 +56,72 @@ This project aims to provide a flexible and powerful toolkit for financial analy
 
 ### Repo Directory Structure
 FINPAK/
-├── src/
-│   └── financial_analysis/
-│       ├── data/
-│       │   ├── fetchers/
-│       │   │   ├── yahoo.py
-│       │   │   └── __init__.py
-│       │   ├── cleaners/
-│       │   │   ├── data_cleaner.py
-│       │   │   └── __init__.py
-│       │   └── __init__.py
-│       ├── analysis/
-│       │   ├── indicators/
-│       │   │   ├── technical/
-│       │   │   │   ├── momentum.py
-│       │   │   │   ├── trend.py
-│       │   │   │   ├── volatility.py
-│       │   │   │   └── __init__.py
-│       │   │   ├── fundamental/
-│       │   │   │   └── __init__.py
-│       │   │   └── __init__.py
-│       │   ├── screeners/
-│       │   │   ├── equity_screener.py
-│       │   │   ├── currency_screener.py
-│       │   │   ├── screener_base.py
-│       │   │   └── __init__.py
-│       │   └── __init__.py
-│       ├── trading/
-│       │   ├── systems/
-│       │   │   ├── trend_following.py
-│       │   │   ├── mean_reversion.py
-│       │   │   ├── custom_system.py
-│       │   │   └── __init__.py
-│       │   ├── signals/
-│       │   │   ├── signal_generator.py
-│       │   │   └── __init__.py
-│       │   ├── allocation/
-│       │   │   ├── position_sizer.py
-│       │   │   ├── portfolio_manager.py
-│       │   │   └── __init__.py
-│       │   └── __init__.py
-│       ├── performance/
-│       │   ├── metrics/
-│       │   │   ├── returns.py
-│       │   │   ├── risk.py
-│       │   │   ├── ratios.py
-│       │   │   └── __init__.py
-│       │   ├── tracking/
-│       │   │   ├── trade_tracker.py
-│       │   │   ├── system_tracker.py
-│       │   │   └── __init__.py
-│       │   ├── reporting/
-│       │   │   ├── performance_report.py
-│       │   │   └── __init__.py
-│       │   └── __init__.py
-│       ├── visualization/
-│       │   ├── charting/
-│       │   │   ├── single_security.py
-│       │   │   ├── multi_security.py
-│       │   │   └── __init__.py
-│       │   └── __init__.py
-│       ├── utils/
-|       |   |── constants.py
-│       │   ├── calculations.py
-│       │   ├── aggregations.py
-│       │   └── __init__.py
-│       └── __init__.py
+├── finpak/
+|   ├── pipelines/
+│   ├── data/
+│   │   ├── fetchers/
+│   │   │   ├── yahoo.py
+│   │   │   └── __init__.py
+│   │   ├── cleaners/
+│   │   │   ├── data_cleaner.py
+│   │   │   └── __init__.py
+│   │   └── __init__.py
+│   ├── analysis/
+│   │   ├── indicators/
+│   │   │   ├── technical/
+│   │   │   │   ├── momentum.py
+│   │   │   │   ├── trend.py
+│   │   │   │   ├── volatility.py
+│   │   │   │   └── __init__.py
+│   │   │   ├── fundamental/
+│   │   │   │   └── __init__.py
+│   │   │   └── __init__.py
+│   │   ├── screeners/
+│   │   │   ├── equity_screener.py
+│   │   │   ├── currency_screener.py
+│   │   │   ├── screener_base.py
+│   │   │   └── __init__.py
+│   │   └── __init__.py
+│   ├── trading/
+│   │   ├── systems/
+│   │   │   ├── trend_following.py
+│   │   │   ├── mean_reversion.py
+│   │   │   ├── custom_system.py
+│   │   │   └── __init__.py
+│   │   ├── signals/
+│   │   │   ├── signal_generator.py
+│   │   │   └── __init__.py
+│   │   ├── allocation/
+│   │   │   ├── position_sizer.py
+│   │   │   ├── portfolio_manager.py
+│   │   │   └── __init__.py
+│   │   └── __init__.py
+│   ├── performance/
+│   │   ├── metrics/
+│   │   │   ├── returns.py
+│   │   │   ├── risk.py
+│   │   │   ├── ratios.py
+│   │   │   └── __init__.py
+│   │   ├── tracking/
+│   │   │   ├── trade_tracker.py
+│   │   │   ├── system_tracker.py
+│   │   │   └── __init__.py
+│   │   ├── reporting/
+│   │   │   ├── performance_report.py
+│   │   │   └── __init__.py
+│   │   └── __init__.py
+│   ├── visualization/
+│   │   ├── charting/
+│   │   │   ├── single_security.py
+│   │   │   ├── multi_security.py
+│   │   │   └── __init__.py
+│   │   └── __init__.py
+│   ├── utils/
+|   |   |── constants.py
+│   │   ├── calculations.py
+│   │   ├── aggregations.py
+│   │   └── __init__.py
+│   └── __init__.py
 ├── tests/
 │   └── financial_analysis/
 │       ├── data/

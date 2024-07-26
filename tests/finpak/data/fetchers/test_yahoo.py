@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import date
 from unittest.mock import patch, MagicMock
 
-from finpak.data.fetchers.yahoo import (
+from data.fetchers.yahoo import (
     download_historical_data,
     download_multiple_tickers,
     save_data_to_file,
@@ -15,7 +15,7 @@ from finpak.data.fetchers.yahoo import (
 
 class TestYahooFetchers(unittest.TestCase):
 
-    @patch('finpak.data.fetchers.yahoo.yf.download')
+    @patch('data.fetchers.yahoo.yf.download')
     def test_download_historical_data(self, mock_download):
         mock_data = pd.DataFrame({
             'Date': pd.date_range(start='2020-01-01', end='2020-01-10'),
@@ -27,7 +27,7 @@ class TestYahooFetchers(unittest.TestCase):
         self.assertIsInstance(data, pd.DataFrame)
         self.assertFalse(data.empty)
 
-    @patch('finpak.data.fetchers.yahoo.yf.download')
+    @patch('data.fetchers.yahoo.yf.download')
     def test_download_multiple_tickers(self, mock_download):
         mock_data = pd.DataFrame({
             'Date': pd.date_range(start='2020-01-01', end='2020-01-10'),
@@ -64,7 +64,7 @@ class TestYahooFetchers(unittest.TestCase):
         loaded_data = pd.read_parquet(filename)
         pd.testing.assert_frame_equal(data, loaded_data)
 
-    @patch('finpak.data.fetchers.yahoo.yf.download')
+    @patch('data.fetchers.yahoo.yf.download')
     def test_update_data_file(self, mock_download):
         mock_data = pd.DataFrame({
             'Date': pd.date_range(start='2020-01-01', end='2020-01-10'),
@@ -79,9 +79,9 @@ class TestYahooFetchers(unittest.TestCase):
         updated_data = pd.read_csv(filename, index_col=0, parse_dates=True)
         self.assertFalse(updated_data.empty)
 
-    @patch('finpak.data.fetchers.yahoo.os.path.exists')
-    @patch('finpak.data.fetchers.yahoo.os.listdir')
-    @patch('finpak.data.fetchers.yahoo.pd.read_csv')
+    @patch('data.fetchers.yahoo.os.path.exists')
+    @patch('data.fetchers.yahoo.os.listdir')
+    @patch('data.fetchers.yahoo.pd.read_csv')
     def test_check_existing_data_csv(self, mock_read_csv, mock_listdir, mock_exists):
         mock_exists.return_value = True
         mock_listdir.return_value = ['2020-01-01.csv']
@@ -95,9 +95,9 @@ class TestYahooFetchers(unittest.TestCase):
         self.assertIsInstance(existing_data, pd.DataFrame)
         self.assertFalse(existing_data.empty)
 
-    @patch('finpak.data.fetchers.yahoo.os.path.exists')
-    @patch('finpak.data.fetchers.yahoo.os.listdir')
-    @patch('finpak.data.fetchers.yahoo.pd.read_parquet')
+    @patch('data.fetchers.yahoo.os.path.exists')
+    @patch('data.fetchers.yahoo.os.listdir')
+    @patch('data.fetchers.yahoo.pd.read_parquet')
     def test_check_existing_data_parquet(self, mock_read_parquet, mock_listdir, mock_exists):
         mock_exists.return_value = True
         mock_listdir.return_value = ['2020-01-01.parquet']

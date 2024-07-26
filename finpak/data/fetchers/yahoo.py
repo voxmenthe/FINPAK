@@ -91,10 +91,10 @@ def save_data_to_file(data, ticker, file_format='csv'):
     filename (str): The name of the file.
     file_format (str): The file format ('csv' or 'parquet').
     """
-    folder_path = os.path.join('data_store', ticker)
+    folder_path = 'data_store'
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
-    filename = os.path.join(folder_path, f"{date.today().strftime('%Y-%m-%d')}.{file_format}")
+    filename = os.path.join(folder_path, f"{ticker}.{file_format}")
 
     if file_format == 'csv':
         data.to_csv(filename)

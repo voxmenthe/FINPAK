@@ -10,14 +10,6 @@ This directory contains all the unit tests for the Financial Analysis Tool. The 
 To run all tests, you can use the following command from the root directory of the project:
 
 ```bash
-python -m unittest discover -s tests
-```
-
-This command will discover and run all the test cases in the `tests` directory.
-
-Alternatively, if you are using `pytest`, you can run:
-
-```bash
 pytest tests
 ```
 

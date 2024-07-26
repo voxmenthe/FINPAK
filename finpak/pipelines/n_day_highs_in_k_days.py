@@ -4,9 +4,9 @@ from utils.calculations import n_day_high_in_last_k_days
 
 def main():
     tickers = ['AAPL', 'MSFT', 'GOOGL']
-    start_date = '2024-05-01'
+    start_date = '2024-04-01'
     end_date = '2024-07-31'
-    n = 60
+    n = 6
     k = 12
 
     # Download historical data for the tickers
