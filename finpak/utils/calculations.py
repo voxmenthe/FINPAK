@@ -42,5 +42,29 @@ def n_day_high_in_last_k_days(data: np.array, n: int, k: int):
 
     # Calculate the maximum of the last k days for each ticker
     result = np.max(last_k_days_highs, axis=0)
+    
+    # Check if each ticker saw a new n-day high in the last k days
+    last_k_days_data = data[-k:]
+    new_high_check = np.max(last_k_days_data, axis=0) >= np.max(n_day_highs[:-k], axis=0)
 
-    return result
+    return result, new_high_check
+
+
+def n_day_low_in_last_k_days(data: np.array, n: int, k: int):
+    assert k >= n, "k must be greater than or equal to n"
+    assert len(data.shape) == 2, "Input data must be a 2D numpy array"
+
+    # Calculate the N-day low for each position
+    n_day_lows = np.min(rolling_window(data, n), axis=1)
+
+    # Get the last k days of n_day_lows
+    last_k_days_lows = n_day_lows[-k:]
+
+    # Calculate the minimum of the last k days for each ticker
+    result = np.min(last_k_days_lows, axis=0)
+
+    # Check if each ticker saw a new n-day low in the last k days
+    last_k_days_data = data[-k:]
+    new_low_check = np.min(last_k_days_data, axis=0) <= np.min(n_day_lows[:-k], axis=0)
+
+    return result, new_low_check
