@@ -5,6 +5,24 @@ import yfinance as yf
 from datetime import date
 
 
+def list_available_data(ticker, file_format='csv'):
+    """
+    List available data files for a given ticker.
+
+    Parameters:
+    ticker (str): The ticker symbol.
+    file_format (str): The file format ('csv' or 'parquet').
+
+    Returns:
+    list: A list of available data files.
+    """
+    folder_path = os.path.join('data_store', ticker)
+    if not os.path.exists(folder_path):
+        return []
+
+    return [f for f in os.listdir(folder_path) if f.endswith(f'.{file_format}')]
+
+
 def check_existing_data(ticker, start_date, end_date, interval='1d', file_format='csv'):
     """
     Check if the data for the given date range exists in the data store.
