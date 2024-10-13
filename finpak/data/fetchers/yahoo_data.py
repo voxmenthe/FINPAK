@@ -79,7 +79,7 @@ def check_existing_data(ticker, interval='1d', file_format='csv', folder_path='d
 
 def download_historical_data(ticker, start_date, end_date, interval='1d', file_format='csv', folder_path='data_store'):
     """
-    Download historical data for a single ticker, updating existing data if necessary.
+    Download historical data for a single ticker, only downloading additional data if it doesn't exist.
 
     Parameters:
     ticker (str): The ticker symbol.
@@ -92,47 +92,43 @@ def download_historical_data(ticker, start_date, end_date, interval='1d', file_f
     Returns:
     pd.DataFrame: The historical data.
     """
-    folder_path = os.path.join(folder_path, ticker)
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
 
-    existing_data_info = check_existing_data(ticker, '1900-01-01', date.today().strftime('%Y-%m-%d'), interval, file_format, folder_path)
-    
+    ticker_path = os.path.join(folder_path, ticker) + f".{file_format}"
+
+    existing_data_info = check_existing_data(ticker, interval, file_format, folder_path)        
+
     if existing_data_info:
-        existing_start = existing_data_info['start_date']
-        existing_end = existing_data_info['end_date']
-        
-        # Load existing data
-        existing_data = pd.DataFrame()
-        for file_name in os.listdir(folder_path):
-            file_path = os.path.join(folder_path, file_name)
-            if file_format == 'csv' and file_name.endswith('.csv'):
-                data = pd.read_csv(file_path, index_col=0, parse_dates=True)
-            elif file_format == 'parquet' and file_name.endswith('.parquet'):
-                data = pd.read_parquet(file_path)
-            else:
-                continue
-            existing_data = pd.concat([existing_data, data])
-        
-        existing_data = existing_data.sort_index().drop_duplicates()
-        
-        new_data_parts = []
-        
-        # Download data before existing start date if needed
-        if start_date < existing_start:
-            early_data = yf.download(ticker, start=start_date, end=existing_start, interval=interval)
-            new_data_parts.append(early_data)
-        
-        # Download data after existing end date if needed
-        if end_date > existing_end:
-            late_data = yf.download(ticker, start=existing_end, end=end_date, interval=interval)
-            new_data_parts.append(late_data)
-        
-        # Combine all data
-        if new_data_parts:
-            updated_data = pd.concat([existing_data] + new_data_parts).sort_index().drop_duplicates()
+        existing_start = pd.to_datetime(existing_data_info['start_date'])
+        existing_end = pd.to_datetime(existing_data_info['end_date'])
+        start_date = pd.to_datetime(start_date)
+        end_date = pd.to_datetime(end_date)
+
+        # Check if we need to download additional data
+        need_earlier_data = start_date < existing_start
+        need_later_data = end_date > existing_end
+
+        if need_earlier_data or need_later_data:
+            # Load existing data
+            if file_format == 'csv' and ticker_path.endswith('.csv'):
+                existing_data = pd.read_csv(ticker_path, index_col=0, parse_dates=True)
+            elif file_format == 'parquet' and ticker_path.endswith('.parquet'):
+                existing_data = pd.read_parquet(ticker_path)
+            
+            existing_data = existing_data.sort_index().drop_duplicates()
+
+            if need_earlier_data:
+                earlier_data = yf.download(ticker, start=start_date, end=existing_start, interval=interval)
+                existing_data = pd.concat([earlier_data, existing_data])
+            
+            if need_later_data:
+                later_data = yf.download(ticker, start=existing_end, end=end_date, interval=interval)
+                existing_data = pd.concat([existing_data, later_data])
+            
+            updated_data = existing_data.sort_index().drop_duplicates()
         else:
-            updated_data = existing_data
+            updated_data = existing_data.sort_index().drop_duplicates()
     else:
         updated_data = yf.download(ticker, start=start_date, end=end_date, interval=interval)
     
@@ -140,29 +136,6 @@ def download_historical_data(ticker, start_date, end_date, interval='1d', file_f
         save_data_to_file(updated_data, ticker, file_format, folder_path)
     
     return updated_data.loc[start_date:end_date]
-
-
-#########
-# Not sure if the `download_yahoo_data` function is used anywhere
-def download_yahoo_data(symbol, start_date, end_date):
-    existing_data = check_existing_data(symbol)
-    
-    if existing_data['exists']:
-        if existing_data['start_date'] <= start_date and existing_data['end_date'] >= end_date:
-            print(f"Data for {symbol} already exists for the specified date range.")
-            return
-        
-        if existing_data['start_date'] > start_date:
-            # Download data before existing start date
-            download_and_append_data(symbol, start_date, existing_data['start_date'] - timedelta(days=1), 'prepend')
-        
-        if existing_data['end_date'] < end_date:
-            # Download data after existing end date
-            download_and_append_data(symbol, existing_data['end_date'] + timedelta(days=1), end_date, 'append')
-    else:
-        # Download full date range
-        download_and_append_data(symbol, start_date, end_date, 'write')
-
 
 
 def download_multiple_tickers(tickers, start_date, end_date, interval='1d'):

@@ -1,2 +1,7 @@
 **/__pycache__
 .aider*
+finpak/FINPAK.egg-info
+**/._*
+._*
+**/*.code-workspace
+*.code-workspace
