@@ -5,3 +5,4 @@ finpak/FINPAK.egg-info
 ._*
 **/*.code-workspace
 *.code-workspace
+src/data/*

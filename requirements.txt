@@ -1,7 +1,0 @@
-numpy
-pandas
-polars
-yfinance
-matplotlib
-scipy
-# Add any additional dependencies here

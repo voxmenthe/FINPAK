@@ -1,0 +1,9 @@
+Metadata-Version: 2.1
+Name: FINPAK
+Version: 0.1.0
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: polars
+Requires-Dist: yfinance
+Requires-Dist: matplotlib
+Requires-Dist: scipy
