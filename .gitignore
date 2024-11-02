@@ -6,3 +6,5 @@ finpak/FINPAK.egg-info
 **/*.code-workspace
 *.code-workspace
 src/data/*
+**/*.pt
+**/checkpoints/*
