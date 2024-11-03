@@ -1,50 +1,63 @@
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 import torch
 from typing import Tuple, List
 from stock_dataset import StockDataset
-from preprocessing import create_stock_features
+from preprocessing import create_stock_features, combine_price_series
 
 def create_dataloaders(
-    prices: torch.Tensor,
+    train_prices: torch.Tensor,
+    val_prices: torch.Tensor,
     batch_size: int = 32,
-    sequence_length: int = 60,
-    train_ratio: float = 0.8,
+    sequence_length: int = 0,
     num_workers: int = 4,
     return_periods: List[int] = [1, 5],
     sma_periods: List[int] = [20],
-    target_periods: List[int] = [1, 5],
-    seed: int = 42
+    target_periods: List[int] = [1, 5]
 ) -> Tuple[DataLoader, DataLoader, List[str], List[str]]:
     """
-    Create train and validation dataloaders from price data
+    Create train and validation dataloaders from separate price data
+    
+    Args:
+        train_prices: Tensor of training set price data
+        val_prices: Tensor of validation set price data
+        batch_size: Batch size for dataloaders
+        sequence_length: Length of sequences for transformer
+        num_workers: Number of worker processes for data loading
+        return_periods: List of periods for calculating returns
+        sma_periods: List of periods for calculating SMAs
+        target_periods: List of periods for target returns
     """
-    # Process features
-    stock_features = create_stock_features(
-        prices=prices,
+    # Process features for training data
+    train_features = create_stock_features(
+        prices=train_prices,
         return_periods=return_periods,
         sma_periods=sma_periods,
         target_periods=target_periods
     )
     
-    # Create full dataset
-    dataset = StockDataset(
-        features=stock_features.features,
-        targets=stock_features.targets,
-        sequence_length=sequence_length,
-        feature_names=stock_features.feature_names,
-        target_names=stock_features.target_names
+    # Process features for validation data
+    val_features = create_stock_features(
+        prices=val_prices,
+        return_periods=return_periods,
+        sma_periods=sma_periods,
+        target_periods=target_periods
     )
     
-    # Calculate split sizes
-    train_size = int(train_ratio * len(dataset))
-    val_size = len(dataset) - train_size
+    # Create datasets
+    train_dataset = StockDataset(
+        features=train_features.features,
+        targets=train_features.targets,
+        sequence_length=sequence_length,
+        feature_names=train_features.feature_names,
+        target_names=train_features.target_names
+    )
     
-    # Create train/validation split
-    generator = torch.Generator().manual_seed(seed)
-    train_dataset, val_dataset = random_split(
-        dataset, 
-        [train_size, val_size],
-        generator=generator
+    val_dataset = StockDataset(
+        features=val_features.features,
+        targets=val_features.targets,
+        sequence_length=sequence_length,
+        feature_names=val_features.feature_names,
+        target_names=val_features.target_names
     )
     
     # Create dataloaders
@@ -67,6 +80,6 @@ def create_dataloaders(
     return (
         train_loader,
         val_loader,
-        stock_features.feature_names,
-        stock_features.target_names
+        train_features.feature_names,
+        train_features.target_names
     )

@@ -19,6 +19,7 @@ def train_model(
     warmup_steps: int = 1000,
     max_checkpoints: int = 3,
     checkpoint_dir: str = "checkpoints",
+    prefix: str = 'mpv',
     patience: int = 7,
     min_delta: float = 0.0,
     start_epoch: int = 0
@@ -111,7 +112,7 @@ def train_model(
         # Handle model checkpointing
         if len(best_models) < max_checkpoints:
             heappush(best_models, (-current_val_loss, epoch))
-            checkpoint_name = f'chkpt_e_{epoch}_valloss_{current_val_loss:.7f}.pt'
+            checkpoint_name = f'{prefix}_e_{epoch}_valloss_{current_val_loss:.7f}.pt'
             torch.save(checkpoint, os.path.join(checkpoint_dir, checkpoint_name))
         else:
             # If current model is better than worst of our best models
@@ -120,11 +121,11 @@ def train_model(
                 worst_loss, worst_epoch = heappushpop(best_models, (-current_val_loss, epoch))
                 # Find and remove the old checkpoint file that matches the epoch
                 for filename in os.listdir(checkpoint_dir):
-                    if f'chkpt_e_{worst_epoch}_' in filename:
+                    if f'{prefix}_e_{worst_epoch}_' in filename:
                         os.remove(os.path.join(checkpoint_dir, filename))
                 
                 # Save the new checkpoint
-                checkpoint_name = f'chkpt_e_{epoch}_valloss_{current_val_loss:.7f}.pt'
+                checkpoint_name = f'{prefix}_e_{epoch}_valloss_{current_val_loss:.7f}.pt'
                 torch.save(checkpoint, os.path.join(checkpoint_dir, checkpoint_name))
                 print(f"Saved new checkpoint with filename {checkpoint_name}")
         
@@ -132,7 +133,7 @@ def train_model(
         if early_stop(current_val_loss):
             print(f"\nEarly stopping triggered after epoch {epoch}")
             # Save final checkpoint
-            final_checkpoint_name = f'chkpt_final_e_{epoch}_valloss_{current_val_loss:.7f}.pt'
+            final_checkpoint_name = f'{prefix}_final_e_{epoch}_valloss_{current_val_loss:.7f}.pt'
             torch.save(checkpoint, os.path.join(checkpoint_dir, final_checkpoint_name))
             print(f"Saved final checkpoint with filename {final_checkpoint_name}")
             break

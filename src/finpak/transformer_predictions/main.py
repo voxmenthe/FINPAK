@@ -23,59 +23,14 @@ device = get_device()
 
 if __name__ == "__main__":
     print(f"Using device: {device}")
-    epochs = 200
-    max_checkpoints = 5
+    epochs = 260
+    max_checkpoints = 8
     sequence_length = 47
     batch_size = 64 #32
-    patience = 11
+    patience = 18
     learning_rate = 6e-5
-    checkpoint_path = None  # Set this to a checkpoint file path to resume training
+    checkpoint_path = 'checkpoints/mpv1_e_42_valloss_0.0019789.pt' # None  # Set this to a checkpoint file path to resume training
 
-    tickers = [
-        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 
-        'DE', 'WMT', 'PG', 'MA', 'GM',
-        'AAL', 'WBA', 'BA', 'INTC', 'LUV', 'PYPL'
-    ]
-    start_date = '1990-01-01'
-    end_date = '2024-11-02'    
-
-    # Download historical data for the tickers
-    data_df = download_multiple_tickers(tickers, start_date, end_date)
-    data_df = data_df.loc[:,'Adj Close'] # Extract from multi-index dataframe
-
-    # Extract price series for all tickers and convert to tensors
-    price_series_list = []
-    for ticker in tickers:
-        prices = data_df[ticker]
-        price_tensor = torch.tensor(prices.to_numpy(), dtype=torch.float32)
-        price_series_list.append(price_tensor)
-    
-    # Combine price series
-    combined_prices = combine_price_series(price_series_list)
-    
-    # Create dataloaders with combined prices
-    train_loader, val_loader, feature_names, target_names = create_dataloaders(
-        prices=combined_prices,
-        batch_size=batch_size,
-        sequence_length=sequence_length,
-        return_periods=[1, 5],
-        sma_periods=[20],
-        target_periods=[1, 5],
-        num_workers=16
-    )
-    
-    # Add some logging to see the effect
-    print(f"Total combined series length: {len(combined_prices)}")
-    print(f"Individual series lengths: {[len(p) for p in price_series_list]}")
-    
-    # Print dataset information
-    print(f"Number of features: {len(feature_names)}")
-    print(f"Features: {feature_names}")
-    print(f"Number of targets: {len(target_names)}")
-    print(f"Targets: {target_names}")
-    print(f"\nTraining batches: {len(train_loader)}")
-    print(f"Validation batches: {len(val_loader)}")
-    
     model_params_v0 = {
         "d_model": 512,
         "n_heads": 4,
@@ -100,11 +55,79 @@ if __name__ == "__main__":
         "dropout": 0.12,
     }
 
+    MODEL_PARAMS = model_params_v1
+    prefix = 'mpv1'
+
+    # Split tickers into training and validation sets
+    train_tickers = [
+        'IBM', 'JPM', 'LEN', 'GS', 'OXY', 'SCHW', 'ISRG', 'HD', 'AVGO', 'PANW',
+        'ADBE', 'NOW', 'CMG', 'LVS', 'ORCL',
+        'DE', 'WMT', 'PG', 'MA', 'GM', 'CLX', 'CRM', 'DIS', 'EBAY',
+        'AAL', 'WBA', 'BA', 'INTC', 'LUV', 'PYPL', 'ED', 'AXP', 'GD', 'GDX',
+        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA',
+    ]
+    
+    val_tickers = ['AMD', 'UAL', 'DKNG', 'IBKR', 'SNOW'] # 'FTNT', 'CRWD',  'CAVA']  # Validation tickers
+    
+    start_date = '1990-01-01'
+    end_date = '2024-11-02'
+
+    # Download and process training data
+    train_df = download_multiple_tickers(train_tickers, start_date, end_date)
+    train_df = train_df.loc[:,'Adj Close']
+    
+    # Download and process validation data
+    val_df = download_multiple_tickers(val_tickers, start_date, end_date)
+    val_df = val_df.loc[:,'Adj Close']
+
+    # Process training price series
+    train_price_series = []
+    for ticker in train_tickers:
+        prices = train_df[ticker]
+        price_tensor = torch.tensor(prices.to_numpy(), dtype=torch.float32)
+        train_price_series.append(price_tensor)
+    
+    # Process validation price series
+    val_price_series = []
+    for ticker in val_tickers:
+        prices = val_df[ticker]
+        price_tensor = torch.tensor(prices.to_numpy(), dtype=torch.float32)
+        val_price_series.append(price_tensor)
+    
+    # Combine price series separately for train and validation
+    combined_train_prices = combine_price_series(train_price_series)
+    combined_val_prices = combine_price_series(val_price_series)
+    
+    # Create dataloaders with separate train/val prices
+    train_loader, val_loader, feature_names, target_names = create_dataloaders(
+        train_prices=combined_train_prices,
+        val_prices=combined_val_prices,
+        batch_size=batch_size,
+        sequence_length=sequence_length,
+        return_periods=[1, 5],
+        sma_periods=[20],
+        target_periods=[1, 5],
+        num_workers=16
+    )
+    
+    # Add logging
+    print("\nDataset Information:")
+    print(f"Training tickers: {train_tickers}")
+    print(f"Validation tickers: {val_tickers}")
+    print(f"\nTraining series length: {len(combined_train_prices)}")
+    print(f"Validation series length: {len(combined_val_prices)}")
+    print(f"\nNumber of features: {len(feature_names)}")
+    print(f"Features: {feature_names}")
+    print(f"Number of targets: {len(target_names)}")
+    print(f"Targets: {target_names}")
+    print(f"\nTraining batches: {len(train_loader)}")
+    print(f"Validation batches: {len(val_loader)}")
+
     # Initialize model with correct input/output dimensions
     model = TimeSeriesDecoder(
         d_input=len(feature_names),
         n_outputs=len(target_names),
-        **model_params_v1,
+        **MODEL_PARAMS,
     )
 
     # Load checkpoint if specified
@@ -130,5 +153,6 @@ if __name__ == "__main__":
         patience=patience,
         device=device,
         learning_rate=learning_rate,
-        start_epoch=start_epoch  # Pass the start epoch to resume training
+        start_epoch=start_epoch,
+        prefix=prefix,  # Pass the start epoch to resume training
     )
