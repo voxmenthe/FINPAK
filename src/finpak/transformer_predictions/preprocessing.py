@@ -99,11 +99,28 @@ def combine_price_series(price_series_list: List[torch.Tensor]) -> torch.Tensor:
     
     return torch.cat(normalized_series)
 
-def normalize_features(features: torch.Tensor) -> torch.Tensor:
+def normalize_features(features: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     """
-    Normalize features using z-score normalization (mean=0, std=1)
+    Normalize features using z-score normalization with safeguards for edge cases.
+    
+    Args:
+        features: Input feature tensor
+        eps: Small constant to prevent division by zero
+        
+    Returns:
+        Normalized features tensor
     """
+    # If we have only 1 sample, return as is
+    if features.size(0) <= 1:
+        return features
+        
     mean = features.mean(dim=0, keepdim=True)
-    std = features.std(dim=0, keepdim=True)
-    # Add small epsilon to avoid division by zero
-    return (features - mean) / (std + 1e-8)
+    
+    # Calculate std with unbiased=False to avoid the degrees of freedom warning
+    # This is fine for normalization purposes
+    std = features.std(dim=0, keepdim=True, unbiased=False)
+    
+    # Replace zero/near-zero std values with 1 to avoid division issues
+    std = torch.where(std < eps, torch.ones_like(std), std)
+    
+    return (features - mean) / std
