@@ -88,8 +88,8 @@ if __name__ == "__main__":
         "d_model": 1024,
         "n_heads": 8,
         "n_layers": 88,
-        "d_ff": 8192,
-        "dropout": 0.12,
+        "d_ff": 2048,
+        "dropout": 0.32,
     }
 
     model_params_v2 = {
@@ -104,7 +104,7 @@ if __name__ == "__main__":
     model = TimeSeriesDecoder(
         d_input=len(feature_names),
         n_outputs=len(target_names),
-        **model_params_v0,
+        **model_params_v1,
     )
 
     # Load checkpoint if specified

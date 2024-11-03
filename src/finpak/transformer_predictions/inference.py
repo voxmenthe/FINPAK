@@ -114,10 +114,10 @@ def plot_predictions(
     plt.figure(figsize=(15, 8))
     
     # Print diagnostic about price series
-    print(f"\nPrice series stats:")
-    print(f"Length: {len(original_prices)}")
-    print(f"Non-NaN values: {torch.isfinite(original_prices).sum().item()}")
-    print(f"Value range: [{original_prices[torch.isfinite(original_prices)].min().item():.2f}, {original_prices[torch.isfinite(original_prices)].max().item():.2f}]")
+    # print(f"\nPrice series stats:")
+    # print(f"Length: {len(original_prices)}")
+    # print(f"Non-NaN values: {torch.isfinite(original_prices).sum().item()}")
+    # print(f"Value range: [{original_prices[torch.isfinite(original_prices)].min().item():.2f}, {original_prices[torch.isfinite(original_prices)].max().item():.2f}]")
     
     # Find the earliest start index and latest end point
     earliest_start = min(start_indices)
@@ -150,10 +150,10 @@ def plot_predictions(
             continue
             
         # Print diagnostic information
-        print(f"\nPrediction sequence {i}:")
-        print(f"Start index: {start_idx}")
-        print(f"Number of predictions: {len(predictions)}")
-        print(f"First few predictions (returns): {predictions[:5, 0]}")
+        # print(f"\nPrediction sequence {i}:")
+        # print(f"Start index: {start_idx}")
+        # print(f"Number of predictions: {len(predictions)}")
+        # print(f"First few predictions (returns): {predictions[:5, 0]}")
         
         # Convert returns to prices
         last_known_price = original_prices[start_idx].item()
@@ -166,8 +166,8 @@ def plot_predictions(
         pred_prices = pred_prices[1:]  # Remove the initial price
         
         # Print diagnostic information about prices
-        print(f"Last known price: {last_known_price}")
-        print(f"First few predicted prices: {pred_prices[:5]}")
+        # print(f"Last known price: {last_known_price}")
+        # print(f"First few predicted prices: {pred_prices[:5]}")
         
         # Plot predicted prices
         pred_idx = range(start_idx, start_idx + len(pred_prices))
@@ -222,10 +222,10 @@ def predict_from_checkpoint(
     if not valid_indices:
         raise ValueError("No valid start indices provided")
     
-    print(f"\nMaking predictions for {len(valid_indices)} start points:")
-    print(f"Valid start indices: {valid_indices}")
-    print(f"Price series length: {len(price_series)}")
-    print(f"Predicting {n_steps} steps for each start point")
+    # print(f"\nMaking predictions for {len(valid_indices)} start points:")
+    # print(f"Valid start indices: {valid_indices}")
+    # print(f"Price series length: {len(price_series)}")
+    # print(f"Predicting {n_steps} steps for each start point")
     
     # Load model
     model = load_model_from_checkpoint(
@@ -237,11 +237,11 @@ def predict_from_checkpoint(
     # Make predictions for each start index
     predictions_list = []
     for start_idx in valid_indices:
-        print(f"\nProcessing start index {start_idx}")
+        # print(f"\nProcessing start index {start_idx}")
         
         # Get initial sequence
         initial_sequence = price_series[max(0, start_idx - sequence_length):start_idx + 1]
-        print(f"Initial sequence length: {len(initial_sequence)}")
+        # print(f"Initial sequence length: {len(initial_sequence)}")
         
         # Make prediction
         predictions = make_autoregressive_prediction(
@@ -252,7 +252,7 @@ def predict_from_checkpoint(
             return_periods,
             sma_periods
         )
-        print(f"Generated {len(predictions)} predictions")
+        # print(f"Generated {len(predictions)} predictions")
         predictions_list.append(predictions)
     
     # Plot results
