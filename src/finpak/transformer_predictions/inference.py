@@ -113,19 +113,13 @@ def plot_predictions(
     """
     plt.figure(figsize=(15, 8))
     
-    # Print diagnostic about price series
-    # print(f"\nPrice series stats:")
-    # print(f"Length: {len(original_prices)}")
-    # print(f"Non-NaN values: {torch.isfinite(original_prices).sum().item()}")
-    # print(f"Value range: [{original_prices[torch.isfinite(original_prices)].min().item():.2f}, {original_prices[torch.isfinite(original_prices)].max().item():.2f}]")
-    
     # Find the earliest start index and latest end point
     earliest_start = min(start_indices)
     latest_end = max([start_idx + len(pred) for start_idx, pred in zip(start_indices, predictions_list)])
     
     # Plot only relevant historical prices
     hist_start = max(0, earliest_start - window_size)  # Start window_size points before earliest prediction
-    hist_end = latest_end  # End at the last prediction point
+    hist_end = min(latest_end, len(original_prices))  # End at either last prediction or last historical price
     
     # Create arrays for valid historical data points
     hist_prices = original_prices[hist_start:hist_end]
@@ -149,12 +143,6 @@ def plot_predictions(
             print(f"\nWarning: Invalid start index {start_idx}, skipping prediction")
             continue
             
-        # Print diagnostic information
-        # print(f"\nPrediction sequence {i}:")
-        # print(f"Start index: {start_idx}")
-        # print(f"Number of predictions: {len(predictions)}")
-        # print(f"First few predictions (returns): {predictions[:5, 0]}")
-        
         # Convert returns to prices
         last_known_price = original_prices[start_idx].item()
         pred_prices = [last_known_price]
@@ -165,11 +153,7 @@ def plot_predictions(
         
         pred_prices = pred_prices[1:]  # Remove the initial price
         
-        # Print diagnostic information about prices
-        # print(f"Last known price: {last_known_price}")
-        # print(f"First few predicted prices: {pred_prices[:5]}")
-        
-        # Plot predicted prices
+        # Plot predicted prices - now handles predictions beyond historical data
         pred_idx = range(start_idx, start_idx + len(pred_prices))
         plt.plot(
             pred_idx,

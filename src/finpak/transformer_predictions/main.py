@@ -26,10 +26,10 @@ if __name__ == "__main__":
     epochs = 260
     max_checkpoints = 8
     sequence_length = 47
-    batch_size = 64 #32
+    batch_size = 64 #32 # try more?
     patience = 18
     learning_rate = 6e-5
-    checkpoint_path = 'checkpoints/mpv1_e_42_valloss_0.0019789.pt' # None  # Set this to a checkpoint file path to resume training
+    checkpoint_path = 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  # Set this to a checkpoint file path to resume training
 
     model_params_v0 = {
         "d_model": 512,
@@ -59,15 +59,17 @@ if __name__ == "__main__":
     prefix = 'mpv1'
 
     # Split tickers into training and validation sets
+    # negative: 'WBA', 'LVS',
     train_tickers = [
+        'TEVA', 'SBUX',
         'IBM', 'JPM', 'LEN', 'GS', 'OXY', 'SCHW', 'ISRG', 'HD', 'AVGO', 'PANW',
-        'ADBE', 'NOW', 'CMG', 'LVS', 'ORCL',
+        'ADBE', 'NOW', 'CMG', 'ORCL',
         'DE', 'WMT', 'PG', 'MA', 'GM', 'CLX', 'CRM', 'DIS', 'EBAY',
-        'AAL', 'WBA', 'BA', 'INTC', 'LUV', 'PYPL', 'ED', 'AXP', 'GD', 'GDX',
         'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA',
+        'AAL',  'BA', 'INTC', 'LUV', 'PYPL', 'ED', 'AXP', 'GD', 'GDX',
     ]
     
-    val_tickers = ['AMD', 'UAL', 'DKNG', 'IBKR', 'SNOW'] # 'FTNT', 'CRWD',  'CAVA']  # Validation tickers
+    val_tickers = ['AMD', 'FTNT', 'CRWD',  'CAVA', 'IBKR'] # ] , 'SNOW', 'UAL', 'DKNG',  # Validation tickers
     
     start_date = '1990-01-01'
     end_date = '2024-11-02'
