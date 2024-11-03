@@ -30,6 +30,9 @@ if __name__ == "__main__":
     patience = 18
     learning_rate = 6e-5
     checkpoint_path = 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  # Set this to a checkpoint file path to resume training
+    return_periods=[1, 4, 8, 16],
+    sma_periods=[20],
+    target_periods=[1, 4, 8, 16],
 
     model_params_v0 = {
         "d_model": 512,
@@ -45,6 +48,14 @@ if __name__ == "__main__":
         "n_layers": 88,
         "d_ff": 2048,
         "dropout": 0.32,
+    }
+
+    model_params_v1a = {
+        "d_model": 1024,
+        "n_heads": 8,
+        "n_layers": 88,
+        "d_ff": 3072,
+        "dropout": 0.23,
     }
 
     model_params_v2 = {
@@ -106,9 +117,9 @@ if __name__ == "__main__":
         val_prices=combined_val_prices,
         batch_size=batch_size,
         sequence_length=sequence_length,
-        return_periods=[1, 5],
-        sma_periods=[20],
-        target_periods=[1, 5],
+        return_periods=return_periods,
+        sma_periods=sma_periods,
+        target_periods=target_periods,
         num_workers=16
     )
     

@@ -45,7 +45,9 @@ def make_autoregressive_prediction(
     n_steps: int,
     device: torch.device,
     return_periods: List[int] = [1, 5],
-    sma_periods: List[int] = [20]
+    sma_periods: List[int] = [20],
+    use_multi_horizon: bool = False,
+    horizon_weights: Optional[List[float]] = None
 ) -> torch.Tensor:
     """
     Make autoregressive predictions starting from an initial sequence.
@@ -57,6 +59,9 @@ def make_autoregressive_prediction(
         device: Device to run inference on
         return_periods: List of return periods for feature calculation
         sma_periods: List of SMA periods for feature calculation
+        use_multi_horizon: Whether to use multiple prediction horizons
+        horizon_weights: Weights for different prediction horizons [1d_weight, 5d_weight]
+                        Defaults to [0.7, 0.3] if not provided
     
     Returns:
         Tensor of predicted returns for each step
@@ -64,27 +69,31 @@ def make_autoregressive_prediction(
     model.eval()
     predictions = []
     
+    if use_multi_horizon and horizon_weights is None:
+        print("Using default horizon weights")
+        defwgt = 1 / len(return_periods)
+        horizon_weights = [defwgt] * len(return_periods)
+    
     # Create initial features
     current_sequence = initial_sequence.clone()
     sequence_length = model.pos_embedding.shape[1]
     
     with torch.no_grad():
-        for _ in range(n_steps):
+        for step in range(n_steps):
             # Create features for current sequence
             features = create_stock_features(
                 current_sequence,
                 return_periods=return_periods,
                 sma_periods=sma_periods,
-                target_periods=[1]  # Only need next step prediction
+                target_periods=target_periods  # Always get all predictions
             ).features
             
-            # Normalize features - unsure if necessary
+            # Normalize features
             features = normalize_features(features)
             
             # Ensure we have enough data points
             if len(features) < sequence_length:
                 pad_length = sequence_length - len(features)
-                # Pad with zeros at the beginning
                 features = torch.cat([torch.zeros(pad_length, features.shape[1]), features])
             
             # Get last sequence_length points
@@ -92,11 +101,49 @@ def make_autoregressive_prediction(
             
             # Make prediction
             pred = model(input_sequence)
-            predictions.append(pred[0].cpu())
             
-            # Update price sequence with predicted return
-            last_price = current_sequence[-1]
-            next_price = last_price * (1 + pred[0][0].item())
+            if use_multi_horizon:
+                # Calculate which horizons we can use based on remaining steps
+                remaining_steps = n_steps - step
+                valid_horizons = [(i, period) for i, period in enumerate(return_periods) 
+                                if remaining_steps >= period - 1]
+                
+                if valid_horizons:
+                    # Recalculate weights for available horizons to sum to 1
+                    valid_indices = [i for i, _ in valid_horizons]
+                    if horizon_weights is None:
+                        # Equal weighting for available horizons
+                        curr_weights = [1.0 / len(valid_horizons)] * len(valid_horizons)
+                    else:
+                        # Normalize provided weights for available horizons
+                        raw_weights = [horizon_weights[i] for i in valid_indices]
+                        weight_sum = sum(raw_weights)
+                        curr_weights = [w / weight_sum for w in raw_weights]
+                    
+                    # Calculate weighted average of available horizon predictions
+                    weighted_return = 0.0
+                    for (i, period), weight in zip(valid_horizons, curr_weights):
+                        period_return = pred[0][i].item()
+                        daily_return = period_return / period
+                        weighted_return += weight * daily_return
+                    
+                    # Store all predictions for analysis
+                    predictions.append(pred[0])
+                    
+                    # Update price sequence with weighted prediction
+                    last_price = current_sequence[-1]
+                    next_price = last_price * (1 + weighted_return)
+                else:
+                    # No valid horizons available, use shortest horizon
+                    predictions.append(pred[0])
+                    last_price = current_sequence[-1]
+                    next_price = last_price * (1 + pred[0][0].item())
+            else:
+                # Multi-horizon disabled, use shortest horizon
+                predictions.append(pred[0])
+                last_price = current_sequence[-1]
+                next_price = last_price * (1 + pred[0][0].item())
+            
             current_sequence = torch.cat([current_sequence, torch.tensor([next_price])])
     
     return torch.stack(predictions)
@@ -184,7 +231,9 @@ def predict_from_checkpoint(
     sequence_length: int = 47,
     return_periods: List[int] = [1, 5],
     sma_periods: List[int] = [20],
-    device: Optional[torch.device] = None
+    device: Optional[torch.device] = None,
+    use_multi_horizon: bool = False,
+    horizon_weights: Optional[List[float]] = None
 ) -> None:
     """
     Load a model from checkpoint and make/plot predictions from multiple start points.
@@ -234,7 +283,9 @@ def predict_from_checkpoint(
             n_steps,
             device,
             return_periods,
-            sma_periods
+            sma_periods,
+            use_multi_horizon=use_multi_horizon,
+            horizon_weights=horizon_weights
         )
         # print(f"Generated {len(predictions)} predictions")
         predictions_list.append(predictions)

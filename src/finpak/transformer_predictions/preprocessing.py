@@ -2,6 +2,7 @@ import torch
 from typing import List
 from stock_dataset import StockFeatures
 
+
 def calculate_returns(prices: torch.Tensor, periods: int) -> torch.Tensor:
     """Calculate percentage returns over specified periods"""
     returns = (prices[periods:] - prices[:-periods]) / prices[:-periods]
