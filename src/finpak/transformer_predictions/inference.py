@@ -47,32 +47,21 @@ def make_autoregressive_prediction(
     return_periods: List[int] = [1, 5],
     sma_periods: List[int] = [20],
     use_multi_horizon: bool = False,
-    horizon_weights: Optional[List[float]] = None
+    horizon_weights: Optional[List[float]] = None,
+    use_dampening: bool = False
 ) -> torch.Tensor:
     """
     Make autoregressive predictions starting from an initial sequence.
     
     Args:
-        model: Trained TimeSeriesDecoder model
-        initial_sequence: Initial price sequence tensor
-        n_steps: Number of steps to predict into the future
-        device: Device to run inference on
-        return_periods: List of return periods for feature calculation
-        sma_periods: List of SMA periods for feature calculation
-        use_multi_horizon: Whether to use multiple prediction horizons
-        horizon_weights: Weights for different prediction horizons [1d_weight, 5d_weight]
-                        Defaults to [0.7, 0.3] if not provided
-    
-    Returns:
-        Tensor of predicted returns for each step
+        ... (existing args) ...
+        use_dampening: If True, applies exponential dampening to longer-horizon predictions
     """
     model.eval()
     predictions = []
     
     if use_multi_horizon and horizon_weights is None:
-        print("Using default horizon weights")
-        defwgt = 1 / len(return_periods)
-        horizon_weights = [defwgt] * len(return_periods)
+        horizon_weights = [1.0 / len(return_periods)] * len(return_periods)
     
     # Create initial features
     current_sequence = initial_sequence.clone()
@@ -85,7 +74,7 @@ def make_autoregressive_prediction(
                 current_sequence,
                 return_periods=return_periods,
                 sma_periods=sma_periods,
-                target_periods=target_periods  # Always get all predictions
+                target_periods=return_periods
             ).features
             
             # Normalize features
@@ -101,49 +90,52 @@ def make_autoregressive_prediction(
             
             # Make prediction
             pred = model(input_sequence)
+            predictions.append(pred[0])
             
+            # Update price sequence based on prediction
+            last_price = current_sequence[-1]
             if use_multi_horizon:
                 # Calculate which horizons we can use based on remaining steps
                 remaining_steps = n_steps - step
                 valid_horizons = [(i, period) for i, period in enumerate(return_periods) 
-                                if remaining_steps >= period - 1]
+                                if period <= remaining_steps + 1]
                 
                 if valid_horizons:
-                    # Recalculate weights for available horizons to sum to 1
+                    # Normalize weights for available horizons
                     valid_indices = [i for i, _ in valid_horizons]
-                    if horizon_weights is None:
-                        # Equal weighting for available horizons
-                        curr_weights = [1.0 / len(valid_horizons)] * len(valid_horizons)
-                    else:
-                        # Normalize provided weights for available horizons
-                        raw_weights = [horizon_weights[i] for i in valid_indices]
-                        weight_sum = sum(raw_weights)
-                        curr_weights = [w / weight_sum for w in raw_weights]
+                    raw_weights = [horizon_weights[i] for i in valid_indices]
+                    weight_sum = sum(raw_weights)
+                    curr_weights = [w / weight_sum for w in raw_weights]
                     
-                    # Calculate weighted average of available horizon predictions
-                    weighted_return = 0.0
+                    # Calculate weighted average return
+                    next_return = 0.0
                     for (i, period), weight in zip(valid_horizons, curr_weights):
                         period_return = pred[0][i].item()
-                        daily_return = period_return / period
-                        weighted_return += weight * daily_return
-                    
-                    # Store all predictions for analysis
-                    predictions.append(pred[0])
-                    
-                    # Update price sequence with weighted prediction
-                    last_price = current_sequence[-1]
-                    next_price = last_price * (1 + weighted_return)
+                        
+                        # The model predicts total return over the period
+                        # Convert to effective daily return using:
+                        # (1 + r_total)^(1/n) - 1 where n is the period length
+                        if period > 1:
+                            # For multi-day predictions, convert to daily return
+                            daily_return = (1 + period_return) ** (1/period) - 1
+                            if use_dampening:
+                                # Apply dampening factor for longer horizons
+                                dampening = 0.9 ** (period - 1)
+                                daily_return *= dampening
+                        else:
+                            # For 1-day predictions, use as is
+                            daily_return = period_return
+                        
+                        next_return += weight * daily_return
                 else:
-                    # No valid horizons available, use shortest horizon
-                    predictions.append(pred[0])
-                    last_price = current_sequence[-1]
-                    next_price = last_price * (1 + pred[0][0].item())
+                    # If no valid horizons, use shortest horizon
+                    next_return = pred[0][0].item()
             else:
-                # Multi-horizon disabled, use shortest horizon
-                predictions.append(pred[0])
-                last_price = current_sequence[-1]
-                next_price = last_price * (1 + pred[0][0].item())
+                # Use shortest horizon only
+                next_return = pred[0][0].item()
             
+            # Apply return to get next price
+            next_price = last_price * (1 + next_return)
             current_sequence = torch.cat([current_sequence, torch.tensor([next_price])])
     
     return torch.stack(predictions)

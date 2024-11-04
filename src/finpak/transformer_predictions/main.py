@@ -26,13 +26,13 @@ if __name__ == "__main__":
     epochs = 260
     max_checkpoints = 8
     sequence_length = 47
-    batch_size = 64 #32 # try more?
+    batch_size = 128 #32 # try more?
     patience = 18
     learning_rate = 6e-5
-    checkpoint_path = 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  # Set this to a checkpoint file path to resume training
-    return_periods=[1, 4, 8, 16],
-    sma_periods=[20],
-    target_periods=[1, 4, 8, 16],
+    checkpoint_path = None # 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  # Set this to a checkpoint file path to resume training
+    return_periods=[1, 4, 8, 16]
+    sma_periods=[20]
+    target_periods=[1, 4, 8, 16]
 
     model_params_v0 = {
         "d_model": 512,
@@ -66,13 +66,13 @@ if __name__ == "__main__":
         "dropout": 0.12,
     }
 
-    MODEL_PARAMS = model_params_v1
-    prefix = 'mpv1'
+    MODEL_PARAMS = model_params_v1a
+    prefix = 'mpv1a'
 
     # Split tickers into training and validation sets
     # negative: 'WBA', 'LVS',
     train_tickers = [
-        'TEVA', 'SBUX',
+        'TEVA', 'SBUX', 'WBA', 'LVS',
         'IBM', 'JPM', 'LEN', 'GS', 'OXY', 'SCHW', 'ISRG', 'HD', 'AVGO', 'PANW',
         'ADBE', 'NOW', 'CMG', 'ORCL',
         'DE', 'WMT', 'PG', 'MA', 'GM', 'CLX', 'CRM', 'DIS', 'EBAY',

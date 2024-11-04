@@ -3,11 +3,22 @@ from typing import List
 from stock_dataset import StockFeatures
 
 
-def calculate_returns(prices: torch.Tensor, periods: int) -> torch.Tensor:
+def calculate_returns(prices: torch.Tensor, period: int) -> torch.Tensor:
     """Calculate percentage returns over specified periods"""
-    returns = (prices[periods:] - prices[:-periods]) / prices[:-periods]
+    if not isinstance(period, int):
+        print(f"Debug: calculate_returns called with period type {type(period)}")
+        print(f"Debug: period value: {period}")
+        print(f"Debug: call stack:")
+        import traceback
+        traceback.print_stack()
+        raise TypeError(f"period must be an integer, got {type(period)} instead")
+    
+    if period <= 0:
+        raise ValueError(f"period must be positive, got {period}")
+        
+    returns = (prices[period:] - prices[:-period]) / prices[:-period]
     # Pad to maintain length
-    padding = torch.zeros(periods, dtype=prices.dtype, device=prices.device)
+    padding = torch.zeros(period, dtype=prices.dtype, device=prices.device)
     return torch.cat([padding, returns])
 
 def calculate_sma(prices: torch.Tensor, window: int) -> torch.Tensor:
@@ -51,9 +62,9 @@ def create_stock_features(
     target_names = []
     
     for period in target_periods:
-        future_returns = calculate_returns(prices, period)
+        returns = calculate_returns(prices, period)
         # Shift returns back by period to align with current time
-        target_returns = future_returns[:-period]
+        target_returns = returns[:-period]
         # Pad end with zeros to maintain length
         target_returns = torch.cat([target_returns, torch.zeros(period)])
         target_list.append(target_returns)
