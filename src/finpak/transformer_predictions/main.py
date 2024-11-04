@@ -23,16 +23,17 @@ device = get_device()
 
 if __name__ == "__main__":
     print(f"Using device: {device}")
-    epochs = 260
+    epochs = 15000
     max_checkpoints = 8
     sequence_length = 47
     batch_size = 128 #32 # try more?
-    patience = 18
+    patience = 35
     learning_rate = 6e-5
-    checkpoint_path = None # 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  # Set this to a checkpoint file path to resume training
+    checkpoint_path = 'mpv1a_e_77_valloss_0.0024084.pt' # 'mpv000_e245_valloss_0.0016670.pt' # None # 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  # Set this to a checkpoint file path to resume training
     return_periods=[1, 4, 8, 16]
     sma_periods=[20]
     target_periods=[1, 4, 8, 16]
+    DEBUG = True
 
     model_params_v0 = {
         "d_model": 512,
@@ -40,6 +41,14 @@ if __name__ == "__main__":
         "n_layers": 56,
         "d_ff": 2048,
         "dropout": 0.12,
+    }
+
+    model_params_v000 = {
+        "d_model": 128,
+        "n_heads": 4,
+        "n_layers": 8,
+        "d_ff": 128,
+        "dropout": 0.05
     }
 
     model_params_v1 = {
@@ -71,16 +80,20 @@ if __name__ == "__main__":
 
     # Split tickers into training and validation sets
     # negative: 'WBA', 'LVS',
+    # unsure: 
     train_tickers = [
-        'TEVA', 'SBUX', 'WBA', 'LVS',
-        'IBM', 'JPM', 'LEN', 'GS', 'OXY', 'SCHW', 'ISRG', 'HD', 'AVGO', 'PANW',
-        'ADBE', 'NOW', 'CMG', 'ORCL',
-        'DE', 'WMT', 'PG', 'MA', 'GM', 'CLX', 'CRM', 'DIS', 'EBAY',
-        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA',
-        'AAL',  'BA', 'INTC', 'LUV', 'PYPL', 'ED', 'AXP', 'GD', 'GDX',
+        'AAPL', 'AAL', 'AVGO', 'ADBE', 'AXP', 'BIIB',
+        'CLX', 'CRM', 'DIS', 'EBAY',
+        'SBUX', 'WBA', 'LVS', 'FDX', 'JNJ', 'LEN',
+        'IBM', 'JPM', 'LEN', 'GS', 'OXY', 'SCHW', 'ISRG', 'HD', 'PANW',
+        'NOW', 'CMG', 'ORCL',
+        'DE', 'WMT', 'PG', 'MA', 'GM',
+        'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA',
+        'BA', 'INTC', 'LUV', 'PYPL', 'ED', 'GD', 'GDX',
+        'TEVA', 'TOL', 'TSLA',
     ]
     
-    val_tickers = ['AMD', 'FTNT', 'CRWD',  'CAVA', 'IBKR'] # ] , 'SNOW', 'UAL', 'DKNG',  # Validation tickers
+    val_tickers = ['UAL', 'SNOW', 'AMD', 'IBKR'] # 'FTNT', 'CRWD', 'CAVA', 'AMD', SNOW', 'UAL', 'DKNG',  # Validation tickers
     
     start_date = '1990-01-01'
     end_date = '2024-11-02'
@@ -120,21 +133,23 @@ if __name__ == "__main__":
         return_periods=return_periods,
         sma_periods=sma_periods,
         target_periods=target_periods,
-        num_workers=16
+        num_workers=16,
+        debug=DEBUG
     )
     
-    # Add logging
-    print("\nDataset Information:")
-    print(f"Training tickers: {train_tickers}")
-    print(f"Validation tickers: {val_tickers}")
-    print(f"\nTraining series length: {len(combined_train_prices)}")
-    print(f"Validation series length: {len(combined_val_prices)}")
-    print(f"\nNumber of features: {len(feature_names)}")
-    print(f"Features: {feature_names}")
-    print(f"Number of targets: {len(target_names)}")
-    print(f"Targets: {target_names}")
-    print(f"\nTraining batches: {len(train_loader)}")
-    print(f"Validation batches: {len(val_loader)}")
+    if DEBUG:
+        # Add logging
+        print("\nDataset Information:")
+        print(f"Training tickers: {train_tickers}")
+        print(f"Validation tickers: {val_tickers}")
+        print(f"\nTraining series length: {len(combined_train_prices)}")
+        print(f"Validation series length: {len(combined_val_prices)}")
+        print(f"\nNumber of features: {len(feature_names)}")
+        print(f"Features: {feature_names}")
+        print(f"Number of targets: {len(target_names)}")
+        print(f"Targets: {target_names}")
+        print(f"\nTraining batches: {len(train_loader)}")
+        print(f"Validation batches: {len(val_loader)}")
 
     # Initialize model with correct input/output dimensions
     model = TimeSeriesDecoder(

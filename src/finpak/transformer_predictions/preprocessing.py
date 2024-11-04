@@ -3,7 +3,7 @@ from typing import List
 from stock_dataset import StockFeatures
 
 
-def calculate_returns(prices: torch.Tensor, period: int) -> torch.Tensor:
+def calculate_returns(prices: torch.Tensor, period: int, debug: bool = False) -> torch.Tensor:
     """Calculate percentage returns over specified periods"""
     if not isinstance(period, int):
         print(f"Debug: calculate_returns called with period type {type(period)}")
@@ -15,8 +15,22 @@ def calculate_returns(prices: torch.Tensor, period: int) -> torch.Tensor:
     
     if period <= 0:
         raise ValueError(f"period must be positive, got {period}")
+    
+    if debug:
+        print(f"\nCalculating {period}-day returns:")
+        print(f"First few prices: {prices[:5].tolist()}")
         
     returns = (prices[period:] - prices[:-period]) / prices[:-period]
+    
+    # Debug: Print some sample returns
+    if debug:
+        print(f"First few {period}-day returns: {returns[:5].tolist()}")
+        print(f"Return statistics:")
+        print(f"Mean: {returns[torch.isfinite(returns)].mean().item():.4f}")
+        print(f"Std: {returns[torch.isfinite(returns)].std().item():.4f}")
+        print(f"Min: {returns[torch.isfinite(returns)].min().item():.4f}")
+        print(f"Max: {returns[torch.isfinite(returns)].max().item():.4f}")
+    
     # Pad to maintain length
     padding = torch.zeros(period, dtype=prices.dtype, device=prices.device)
     return torch.cat([padding, returns])
@@ -32,17 +46,25 @@ def create_stock_features(
     prices: torch.Tensor,
     return_periods: List[int] = [1, 5],
     sma_periods: List[int] = [20],
-    target_periods: List[int] = [1, 5]
+    target_periods: List[int] = [1, 5],
+    debug: bool = False
 ) -> StockFeatures:
     """
     Create feature matrix and target variables from price series
     """
+    if debug:
+        print("\nCreating stock features:")
+        print(f"Price series length: {len(prices)}")
+        print(f"First few prices: {prices[:5].tolist()}")
+        print(f"Return periods: {return_periods}")
+        print(f"Target periods: {target_periods}")
+    
     feature_list = []
     feature_names = []
     
     # Calculate return features
     for period in return_periods:
-        returns = calculate_returns(prices, period)
+        returns = calculate_returns(prices, period, debug=debug)
         feature_list.append(returns)
         feature_names.append(f'{period}d_return')
     
@@ -61,18 +83,29 @@ def create_stock_features(
     target_list = []
     target_names = []
     
+    if debug:
+        print("\nCalculating target returns:")
     for period in target_periods:
-        returns = calculate_returns(prices, period)
+        returns = calculate_returns(prices, period, debug=debug)
         # Shift returns back by period to align with current time
         target_returns = returns[:-period]
         # Pad end with zeros to maintain length
         target_returns = torch.cat([target_returns, torch.zeros(period)])
+        valid_returns = target_returns[torch.isfinite(target_returns)]
+        
+        if debug:
+            print(f"\n{period}-day target returns statistics:")
+            print(f"Mean: {valid_returns.mean().item():.4f}")
+            print(f"Std: {valid_returns.std().item():.4f}")
+            print(f"Min: {valid_returns.min().item():.4f}")
+            print(f"Max: {valid_returns.max().item():.4f}")
+        
         target_list.append(target_returns)
         target_names.append(f'future_{period}d_return')
     
     targets = torch.stack(target_list, dim=1)
     
-    # Determine warmup period (maximum lookback needed for any feature)
+    # Determine warmup period
     warmup_period = max(
         max(return_periods, default=0),
         max(sma_periods, default=0),
@@ -81,10 +114,18 @@ def create_stock_features(
     
     # Remove warmup period and any rows with NaN or infinite values
     valid_rows = torch.isfinite(features).all(dim=1) & torch.isfinite(targets).all(dim=1)
-    valid_rows[:warmup_period] = False  # Force first warmup_period rows to be invalid
+    valid_rows[:warmup_period] = False
     
     features = features[valid_rows]
     targets = targets[valid_rows]
+    
+    if debug:
+        print("\nFinal feature/target statistics:")
+        print(f"Number of valid samples: {len(features)}")
+        print("Feature means:", features.mean(dim=0).tolist())
+        print("Feature stds:", features.std(dim=0).tolist())
+        print("Target means:", targets.mean(dim=0).tolist())
+        print("Target stds:", targets.std(dim=0).tolist())
     
     return StockFeatures(
         features=features,

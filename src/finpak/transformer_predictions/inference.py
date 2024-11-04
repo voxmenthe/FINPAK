@@ -48,20 +48,20 @@ def make_autoregressive_prediction(
     sma_periods: List[int] = [20],
     use_multi_horizon: bool = False,
     horizon_weights: Optional[List[float]] = None,
-    use_dampening: bool = False
+    debug: bool = False
 ) -> torch.Tensor:
     """
     Make autoregressive predictions starting from an initial sequence.
-    
-    Args:
-        ... (existing args) ...
-        use_dampening: If True, applies exponential dampening to longer-horizon predictions
     """
     model.eval()
     predictions = []
     
     if use_multi_horizon and horizon_weights is None:
         horizon_weights = [1.0 / len(return_periods)] * len(return_periods)
+    
+    if debug:
+        print(f"\nInitial price: {initial_sequence[-1].item():.2f}")
+        print(f"Horizon weights: {horizon_weights}")
     
     # Create initial features
     current_sequence = initial_sequence.clone()
@@ -74,7 +74,8 @@ def make_autoregressive_prediction(
                 current_sequence,
                 return_periods=return_periods,
                 sma_periods=sma_periods,
-                target_periods=return_periods
+                target_periods=return_periods,
+                debug=debug
             ).features
             
             # Normalize features
@@ -90,53 +91,55 @@ def make_autoregressive_prediction(
             
             # Make prediction
             pred = model(input_sequence)
+            raw_pred = pred[0].cpu().numpy()  # Store raw prediction for debugging
             predictions.append(pred[0])
             
             # Update price sequence based on prediction
-            last_price = current_sequence[-1]
+            last_price = current_sequence[-1].item()
+            
             if use_multi_horizon:
-                # Calculate which horizons we can use based on remaining steps
-                remaining_steps = n_steps - step
-                valid_horizons = [(i, period) for i, period in enumerate(return_periods) 
-                                if period <= remaining_steps + 1]
+                # Simple approach: Just use the 1-day prediction and scale down the N-day prediction
+                one_day_return = pred[0][0].item()
+                n_day_return = pred[0][1].item()  # Assuming second prediction is N-day return
+                scaled_n_day = n_day_return / return_periods[1]  # Simple linear scaling
                 
-                if valid_horizons:
-                    # Normalize weights for available horizons
-                    valid_indices = [i for i, _ in valid_horizons]
-                    raw_weights = [horizon_weights[i] for i in valid_indices]
-                    weight_sum = sum(raw_weights)
-                    curr_weights = [w / weight_sum for w in raw_weights]
-                    
-                    # Calculate weighted average return
-                    next_return = 0.0
-                    for (i, period), weight in zip(valid_horizons, curr_weights):
-                        period_return = pred[0][i].item()
-                        
-                        # The model predicts total return over the period
-                        # Convert to effective daily return using:
-                        # (1 + r_total)^(1/n) - 1 where n is the period length
-                        if period > 1:
-                            # For multi-day predictions, convert to daily return
-                            daily_return = (1 + period_return) ** (1/period) - 1
-                            if use_dampening:
-                                # Apply dampening factor for longer horizons
-                                dampening = 0.9 ** (period - 1)
-                                daily_return *= dampening
-                        else:
-                            # For 1-day predictions, use as is
-                            daily_return = period_return
-                        
-                        next_return += weight * daily_return
-                else:
-                    # If no valid horizons, use shortest horizon
-                    next_return = pred[0][0].item()
+                if debug:  # Print for all steps when debugging
+                    print(f"\nStep {step} diagnostics:")
+                    print(f"Raw model predictions: {raw_pred}")
+                    print(f"1-day predicted return: {one_day_return:.4f}")
+                    print(f"{return_periods[1]}-day predicted return: {n_day_return:.4f}")
+                    print(f"Scaled {return_periods[1]}-day return (daily): {scaled_n_day:.4f}")
+                
+                # Simple weighted average of 1-day and scaled N-day predictions
+                next_return = (horizon_weights[0] * one_day_return + 
+                             horizon_weights[1] * scaled_n_day)
+                
+                if debug:
+                    print(f"Weights: {horizon_weights[0]:.2f} * {one_day_return:.4f} + {horizon_weights[1]:.2f} * {scaled_n_day:.4f}")
+                    print(f"Final weighted return: {next_return:.4f}")
+                    print(f"Current price: {last_price:.2f}")
+                    next_price_debug = last_price * (1 + next_return)
+                    print(f"Next price: {next_price_debug:.2f}")
+                    print(f"Price change: {(next_price_debug - last_price):.2f}")
+                    print(f"Percent change: {(next_return * 100):.2f}%")
             else:
-                # Use shortest horizon only
                 next_return = pred[0][0].item()
             
             # Apply return to get next price
             next_price = last_price * (1 + next_return)
+            
+            # Add sanity check for price changes
+            if debug and abs(next_return) > 0.2:  # Flag large price changes
+                print(f"WARNING: Large price change detected at step {step}!")
+                print(f"Return: {next_return:.4f}")
+                print(f"Price change: {next_price - last_price:.2f}")
+            
             current_sequence = torch.cat([current_sequence, torch.tensor([next_price])])
+    
+    if debug:
+        print(f"\nFinal price: {current_sequence[-1].item():.2f}")
+        print(f"Total price change: {(current_sequence[-1].item() - initial_sequence[-1].item()):.2f}")
+        print(f"Total percent change: {((current_sequence[-1].item() / initial_sequence[-1].item() - 1) * 100):.2f}%")
     
     return torch.stack(predictions)
 
@@ -145,7 +148,10 @@ def plot_predictions(
     original_prices: torch.Tensor,
     start_indices: List[int],
     predictions_list: List[torch.Tensor],
-    window_size: int = 100
+    window_size: int = 100,
+    use_multi_horizon: bool = False,
+    horizon_weights: Optional[List[float]] = None,
+    return_periods: List[int] = [1, 5]
 ) -> None:
     """
     Plot the original price series and multiple predicted future price sequences.
@@ -157,8 +163,8 @@ def plot_predictions(
     latest_end = max([start_idx + len(pred) for start_idx, pred in zip(start_indices, predictions_list)])
     
     # Plot only relevant historical prices
-    hist_start = max(0, earliest_start - window_size)  # Start window_size points before earliest prediction
-    hist_end = min(latest_end, len(original_prices))  # End at either last prediction or last historical price
+    hist_start = max(0, earliest_start - window_size)
+    hist_end = min(latest_end, len(original_prices))
     
     # Create arrays for valid historical data points
     hist_prices = original_prices[hist_start:hist_end]
@@ -177,7 +183,6 @@ def plot_predictions(
     # Plot each prediction sequence
     colors = plt.cm.rainbow(np.linspace(0, 1, len(start_indices)))
     for i, (start_idx, predictions) in enumerate(zip(start_indices, predictions_list)):
-        # Ensure start_idx is valid
         if not torch.isfinite(original_prices[start_idx]):
             print(f"\nWarning: Invalid start index {start_idx}, skipping prediction")
             continue
@@ -186,13 +191,23 @@ def plot_predictions(
         last_known_price = original_prices[start_idx].item()
         pred_prices = [last_known_price]
         
-        for pred_return in predictions[:, 0]:
-            next_price = pred_prices[-1] * (1 + pred_return.item())
+        for pred in predictions:
+            if use_multi_horizon:
+                # Calculate the weighted return the same way as in make_autoregressive_prediction
+                one_day_return = pred[0].item()
+                n_day_return = pred[1].item()
+                scaled_n_day = n_day_return / return_periods[1]
+                next_return = (horizon_weights[0] * one_day_return + 
+                             horizon_weights[1] * scaled_n_day)
+            else:
+                next_return = pred[0].item()
+                
+            next_price = pred_prices[-1] * (1 + next_return)
             pred_prices.append(next_price)
         
         pred_prices = pred_prices[1:]  # Remove the initial price
         
-        # Plot predicted prices - now handles predictions beyond historical data
+        # Plot predicted prices
         pred_idx = range(start_idx, start_idx + len(pred_prices))
         plt.plot(
             pred_idx,
@@ -225,13 +240,17 @@ def predict_from_checkpoint(
     sma_periods: List[int] = [20],
     device: Optional[torch.device] = None,
     use_multi_horizon: bool = False,
-    horizon_weights: Optional[List[float]] = None
+    horizon_weights: Optional[List[float]] = None,
+    debug: bool = False
 ) -> None:
     """
     Load a model from checkpoint and make/plot predictions from multiple start points.
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    if use_multi_horizon and horizon_weights is None:
+        horizon_weights = [1.0 / len(return_periods)] * len(return_periods)
     
     # Validate start indices
     valid_indices = []
@@ -277,10 +296,18 @@ def predict_from_checkpoint(
             return_periods,
             sma_periods,
             use_multi_horizon=use_multi_horizon,
-            horizon_weights=horizon_weights
+            horizon_weights=horizon_weights,
+            debug=debug
         )
         # print(f"Generated {len(predictions)} predictions")
         predictions_list.append(predictions)
     
-    # Plot results
-    plot_predictions(price_series, valid_indices, predictions_list)
+    # Plot results with multi-horizon parameters
+    plot_predictions(
+        price_series, 
+        valid_indices, 
+        predictions_list,
+        use_multi_horizon=use_multi_horizon,
+        horizon_weights=horizon_weights,
+        return_periods=return_periods
+    )

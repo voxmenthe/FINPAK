@@ -12,7 +12,8 @@ def create_dataloaders(
     num_workers: int = 4,
     return_periods: List[int] = [1, 5],
     sma_periods: List[int] = [20],
-    target_periods: List[int] = [1, 5]
+    target_periods: List[int] = [1, 5],
+    debug: bool = False
 ) -> Tuple[DataLoader, DataLoader, List[str], List[str]]:
     """
     Create train and validation dataloaders from separate price data
@@ -26,13 +27,15 @@ def create_dataloaders(
         return_periods: List of periods for calculating returns
         sma_periods: List of periods for calculating SMAs
         target_periods: List of periods for target returns
+        debug: Whether to print debug information
     """
     # Process features for training data
     train_features = create_stock_features(
         prices=train_prices,
         return_periods=return_periods,
         sma_periods=sma_periods,
-        target_periods=target_periods
+        target_periods=target_periods,
+        debug=debug
     )
     
     # Process features for validation data
@@ -40,7 +43,8 @@ def create_dataloaders(
         prices=val_prices,
         return_periods=return_periods,
         sma_periods=sma_periods,
-        target_periods=target_periods
+        target_periods=target_periods,
+        debug=debug
     )
     
     # Create datasets
