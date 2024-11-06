@@ -35,7 +35,7 @@ def train_model(
     os.makedirs(checkpoint_dir, exist_ok=True)
     
     # Initialize early stopping
-    early_stop = EarlyStopping(patience=patience, min_delta=min_delta)
+    early_stop = EarlyStopping(patience=patience, min_delta=min_delta, max_checkpoints=max_checkpoints)
     
     # Initialize heap for keeping track of best models (max heap using negative loss)
     best_models = []
