@@ -48,16 +48,36 @@ def make_autoregressive_prediction(
     sma_periods: List[int] = [20],
     use_multi_horizon: bool = False,
     horizon_weights: Optional[List[float]] = None,
+    use_forcing: bool = False,
+    forcing_halflife: float = 3.0,
+    true_future: Optional[torch.Tensor] = None,
     debug: bool = False
 ) -> torch.Tensor:
     """
     Make autoregressive predictions starting from an initial sequence.
+    
+    Args:
+        use_forcing: Whether to use exponentially decaying teacher forcing
+        forcing_halflife: Number of steps over which forcing influence reduces by half
+        true_future: Optional tensor of true future values for forcing (must be at least n_steps long)
     """
     model.eval()
     predictions = []
     
+    if use_forcing and true_future is None:
+        raise ValueError("true_future must be provided when use_forcing is True")
+    
     if use_multi_horizon and horizon_weights is None:
         horizon_weights = [1.0 / len(return_periods)] * len(return_periods)
+    
+    # Calculate forcing decay factor
+    if use_forcing:
+        decay_factor = 0.5 ** (1.0 / forcing_halflife)
+        forcing_weight = 1.0
+        
+        if debug:
+            print(f"\nUsing teacher forcing with halflife {forcing_halflife}")
+            print(f"Decay factor per step: {decay_factor:.4f}")
     
     if debug:
         print(f"\nInitial price: {initial_sequence[-1].item():.2f}")
@@ -91,7 +111,7 @@ def make_autoregressive_prediction(
             
             # Make prediction
             pred = model(input_sequence)
-            raw_pred = pred[0].cpu().numpy()  # Store raw prediction for debugging
+            raw_pred = pred[0].cpu().numpy()
             predictions.append(pred[0])
             
             # Update price sequence based on prediction
@@ -125,11 +145,27 @@ def make_autoregressive_prediction(
             else:
                 next_return = pred[0][0].item()
             
-            # Apply return to get next price
+            # Calculate next price
             next_price = last_price * (1 + next_return)
             
+            # Apply teacher forcing if enabled
+            if use_forcing:
+                true_next_price = true_future[step].item()
+                forced_price = (forcing_weight * true_next_price + 
+                              (1 - forcing_weight) * next_price)
+                
+                if debug and step < 5:  # Show first few steps of forcing
+                    print(f"\nStep {step} forcing:")
+                    print(f"Model price: {next_price:.2f}")
+                    print(f"True price: {true_next_price:.2f}")
+                    print(f"Forcing weight: {forcing_weight:.4f}")
+                    print(f"Forced price: {forced_price:.2f}")
+                
+                next_price = forced_price
+                forcing_weight *= decay_factor
+            
             # Add sanity check for price changes
-            if debug and abs(next_return) > 0.2:  # Flag large price changes
+            if debug and abs(next_return) > 0.2:
                 print(f"WARNING: Large price change detected at step {step}!")
                 print(f"Return: {next_return:.4f}")
                 print(f"Price change: {next_price - last_price:.2f}")
@@ -213,9 +249,9 @@ def plot_predictions(
             pred_idx,
             pred_prices,
             label=f'Prediction {i} (t={start_idx})',
-            color=colors[i],
+            color='red', #colors[i],
             linewidth=2,
-            linestyle='--'
+            # linestyle='--'
         )
         
         plt.axvline(x=start_idx, color=colors[i], linestyle=':', alpha=0.3)
@@ -241,10 +277,16 @@ def predict_from_checkpoint(
     device: Optional[torch.device] = None,
     use_multi_horizon: bool = False,
     horizon_weights: Optional[List[float]] = None,
+    use_forcing: bool = False,
+    forcing_halflife: float = 3.0,
     debug: bool = False
 ) -> None:
     """
     Load a model from checkpoint and make/plot predictions from multiple start points.
+    
+    Args:
+        use_forcing: Whether to use exponentially decaying teacher forcing
+        forcing_halflife: Number of steps over which forcing influence reduces by half
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -281,11 +323,17 @@ def predict_from_checkpoint(
     # Make predictions for each start index
     predictions_list = []
     for start_idx in valid_indices:
-        # print(f"\nProcessing start index {start_idx}")
-        
         # Get initial sequence
         initial_sequence = price_series[max(0, start_idx - sequence_length):start_idx + 1]
-        # print(f"Initial sequence length: {len(initial_sequence)}")
+        
+        # Get true future values if using forcing
+        true_future = None
+        if use_forcing:
+            future_end = min(start_idx + n_steps, len(price_series))
+            true_future = price_series[start_idx + 1:future_end + 1]
+            if len(true_future) < n_steps:
+                print(f"Warning: Not enough future data for forcing at index {start_idx}")
+                continue
         
         # Make prediction
         predictions = make_autoregressive_prediction(
@@ -297,9 +345,11 @@ def predict_from_checkpoint(
             sma_periods,
             use_multi_horizon=use_multi_horizon,
             horizon_weights=horizon_weights,
+            use_forcing=use_forcing,
+            forcing_halflife=forcing_halflife,
+            true_future=true_future,
             debug=debug
         )
-        # print(f"Generated {len(predictions)} predictions")
         predictions_list.append(predictions)
     
     # Plot results with multi-horizon parameters

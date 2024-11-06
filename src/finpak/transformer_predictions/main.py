@@ -24,15 +24,16 @@ device = get_device()
 if __name__ == "__main__":
     print(f"Using device: {device}")
     epochs = 15000
-    max_checkpoints = 8
+    max_checkpoints = 12
     sequence_length = 47
     batch_size = 128 #32 # try more?
-    patience = 35
-    learning_rate = 6e-5
-    checkpoint_path = 'mpv1a_e_77_valloss_0.0024084.pt' # 'mpv000_e245_valloss_0.0016670.pt' # None # 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  # Set this to a checkpoint file path to resume training
-    return_periods=[1, 4, 8, 16]
+    patience = 48
+    learning_rate = 3e-5
+    # Set this to a checkpoint file path to resume training or None to start from scratch
+    checkpoint_path = None #'mpv1a_e99_valloss_0.0033764.pt' # 'mpv1a_e_77_valloss_0.0024084.pt' # 'mpv000_e245_valloss_0.0016670.pt' # None # 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  
+    return_periods=[1, 2, 3, 4, 6, 12]
     sma_periods=[20]
-    target_periods=[1, 4, 8, 16]
+    target_periods=[1, 2, 3, 4, 6, 12]
     DEBUG = True
 
     model_params_v0 = {
@@ -67,6 +68,14 @@ if __name__ == "__main__":
         "dropout": 0.23,
     }
 
+    model_params_v1b = {
+        "d_model": 2048,
+        "n_heads": 16,
+        "n_layers": 88,
+        "d_ff": 3072,
+        "dropout": 0.28,
+    }
+
     model_params_v2 = {
         "d_model": 2048,
         "n_heads": 32,
@@ -75,28 +84,35 @@ if __name__ == "__main__":
         "dropout": 0.12,
     }
 
-    MODEL_PARAMS = model_params_v1a
-    prefix = 'mpv1a'
+    MODEL_PARAMS = model_params_v1b
+    prefix = 'mpv1b'
 
     # Split tickers into training and validation sets
     # negative: 'WBA', 'LVS',
     # unsure: 
     train_tickers = [
-        'AAPL', 'AAL', 'AVGO', 'ADBE', 'AXP', 'BIIB',
-        'CLX', 'CRM', 'DIS', 'EBAY',
-        'SBUX', 'WBA', 'LVS', 'FDX', 'JNJ', 'LEN',
-        'IBM', 'JPM', 'LEN', 'GS', 'OXY', 'SCHW', 'ISRG', 'HD', 'PANW',
-        'NOW', 'CMG', 'ORCL',
-        'DE', 'WMT', 'PG', 'MA', 'GM',
-        'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA',
-        'BA', 'INTC', 'LUV', 'PYPL', 'ED', 'GD', 'GDX',
-        'TEVA', 'TOL', 'TSLA',
+        'AAPL', 'AAL', 'AMZN', 'AVGO', 'ADBE', 'AXP', 
+        'BA', 'BIIB', 'CLX', 'CMG', 'CRM', 'DIS', 'DE',
+        'EBAY', 'ED', 'FDX',
+        'GM', 'GD', 'GDX', 'GOOGL', 'GS', 'HD',
+        'IBM', 'INTC','ISRG', 
+        'JNJ', 'JPM', 
+        'KRE', 'KO',
+        'LEN', 'LLY','LMT', 'LULU', 'LVS',
+        'NOW', 'ORCL',
+        'PG', 'MA', 'META', 'MGM','MS', 'MSFT', 'NVDA',
+        'OXY', 'PANW',
+        'LUV', 'PYPL', 
+        'SBUX', 'SCHW', 'SMH',
+        'TEVA', 'TGT','TOL', 'TSLA',
+        'UAL', 'UNH', 'UPS',
+        'WBA', 'WMT', 
     ]
     
-    val_tickers = ['UAL', 'SNOW', 'AMD', 'IBKR'] # 'FTNT', 'CRWD', 'CAVA', 'AMD', SNOW', 'UAL', 'DKNG',  # Validation tickers
+    val_tickers = ['UAL', 'SNOW', 'CRWD', 'IBKR', 'AMD', 'COIN'] # 'FTNT', 'CRWD', 'CAVA', 'AMD', 'SNOW', 'UAL', 'DKNG',  # Validation tickers
     
     start_date = '1990-01-01'
-    end_date = '2024-11-02'
+    end_date = '2024-11-05'
 
     # Download and process training data
     train_df = download_multiple_tickers(train_tickers, start_date, end_date)
