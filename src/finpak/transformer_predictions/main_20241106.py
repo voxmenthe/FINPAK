@@ -1,7 +1,7 @@
 import torch
 from data_loading import create_dataloaders
 from modern_timeseries_decoder import ModernTimeSeriesDecoder
-from modern_train import train_model
+from train_20241106 import train_model
 import os
 
 from finpak.data.fetchers.yahoo import download_multiple_tickers
@@ -208,6 +208,7 @@ if __name__ == "__main__":
         patience=patience,
         device=device,
         learning_rate=learning_rate,
+        warmup_steps=1000,  # Add warmup steps parameter
         start_epoch=start_epoch,
         prefix=prefix,
         use_mixed_precision=True if device.type == "cuda" else False  # Enable for CUDA devices only
