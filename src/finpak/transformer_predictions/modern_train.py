@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 import os
 from heapq import heappush, heappushpop
 from early_stopping import EarlyStopping
+from torch.amp import GradScaler, autocast
 
 
 def train_model(
@@ -22,22 +23,24 @@ def train_model(
     prefix: str = 'mpv',
     patience: int = 7,
     min_delta: float = 0.0,
-    start_epoch: int = 0
+    start_epoch: int = 0,
+    use_mixed_precision: bool = False
 ) -> Tuple[List[float], List[float]]:
     """
     Train the model with learning rate warmup and save the best checkpoints
     
     Args:
         start_epoch (int): Epoch to start/resume training from (default: 0)
+        use_mixed_precision (bool): Whether to use mixed precision training (default: False)
     """
-    # Create checkpoint directory if it doesn't exist
     os.makedirs(checkpoint_dir, exist_ok=True)
-    
-    # Initialize early stopping
     early_stop = EarlyStopping(patience=patience, min_delta=min_delta, max_checkpoints=max_checkpoints)
     
     # Initialize heap for keeping track of best models (max heap using negative loss)
     best_models = []
+    
+    # Initialize scaler only if using mixed precision
+    scaler = GradScaler() if use_mixed_precision else None
 
     model = model.to(device)
     optimizer = torch.optim.AdamW(
@@ -72,14 +75,26 @@ def train_model(
             
             optimizer.zero_grad()
             
-            predictions = model(batch_x)
-            loss = F.mse_loss(predictions, batch_y)
+            if use_mixed_precision:
+                with autocast():
+                    predictions = model(batch_x)
+                    loss = F.mse_loss(predictions, batch_y)
+                
+                # Scale gradients and optimize
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                # Standard training
+                predictions = model(batch_x)
+                loss = F.mse_loss(predictions, batch_y)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
             
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
             scheduler.step()
-            
             epoch_loss += loss.item()
             
         train_losses.append(epoch_loss / len(train_loader))
@@ -93,8 +108,13 @@ def train_model(
                 batch_x = batch_x.to(device)
                 batch_y = batch_y.to(device)
                 
-                predictions = model(batch_x)
-                val_loss += F.mse_loss(predictions, batch_y).item()
+                if use_mixed_precision:
+                    with autocast():
+                        predictions = model(batch_x)
+                        val_loss += F.mse_loss(predictions, batch_y).item()
+                else:
+                    predictions = model(batch_x)
+                    val_loss += F.mse_loss(predictions, batch_y).item()
                 
         current_val_loss = val_loss / len(val_loader)
         val_losses.append(current_val_loss)
@@ -107,6 +127,10 @@ def train_model(
             'val_loss': current_val_loss,
             'train_loss': train_losses[-1]
         }
+        
+        # Add scaler state only if using mixed precision
+        if use_mixed_precision:
+            checkpoint['scaler_state_dict'] = scaler.state_dict()
         
         # Handle model checkpointing
         if len(best_models) < max_checkpoints:

@@ -1,5 +1,5 @@
 class EarlyStopping:
-    def __init__(self, patience=7, min_delta=0, mode='min'):
+    def __init__(self, patience=7, min_delta=0, mode='min', max_checkpoints=3):
         """
         Early stopping to stop the training when the loss does not improve after
         certain epochs.
@@ -18,6 +18,7 @@ class EarlyStopping:
         self.min_delta *= 1 if mode == 'min' else -1
         self.best_losses = []  # Track the best losses
         self.recent_losses = []  # Track the recent losses
+        self.max_checkpoints = max_checkpoints  # Use max_checkpoints for best losses
     
     def __call__(self, current_loss):
         if self.best_loss is None:
@@ -43,7 +44,7 @@ class EarlyStopping:
             self.recent_losses.pop(0)
 
         # Update best losses
-        if len(self.best_losses) < self.patience:
+        if len(self.best_losses) < self.max_checkpoints:
             self.best_losses.append(current_loss)
             self.best_losses.sort(reverse=(self.mode == 'max'))
         else:
