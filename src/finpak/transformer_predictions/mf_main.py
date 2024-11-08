@@ -1,6 +1,6 @@
 import torch
 from data_loading import create_dataloaders
-from timeseries_decoder import TimeSeriesDecoder
+from mf_transformer import MF_TimeseriesDecoder
 from train import train_model
 import os
 
@@ -124,7 +124,7 @@ if __name__ == "__main__":
         print(f"Validation batches: {len(val_loader)}")
 
     # Initialize model with correct input/output dimensions
-    model = TimeSeriesDecoder(
+    model = MF_TimeseriesDecoder(
         d_input=len(feature_names),
         n_outputs=len(target_names),
         **MODEL_PARAMS,
