@@ -13,6 +13,7 @@ def create_dataloaders(
     return_periods: List[int] = [1, 5],
     sma_periods: List[int] = [20],
     target_periods: List[int] = [1, 5],
+    config: dict = None,
     debug: bool = False
 ) -> Tuple[DataLoader, DataLoader, List[str], List[str]]:
     """
@@ -35,6 +36,7 @@ def create_dataloaders(
         return_periods=return_periods,
         sma_periods=sma_periods,
         target_periods=target_periods,
+        bin_edges=config['fourier_params']['bin_edges'],
         debug=debug
     )
     
@@ -44,6 +46,7 @@ def create_dataloaders(
         return_periods=return_periods,
         sma_periods=sma_periods,
         target_periods=target_periods,
+        bin_edges=config['fourier_params']['bin_edges'],
         debug=debug
     )
     
