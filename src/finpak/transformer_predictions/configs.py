@@ -1,5 +1,6 @@
 import torch
 
+
 all_configs = {
 
     "test_fourier": {
@@ -9,6 +10,12 @@ all_configs = {
             "n_layers": 8,
             "d_ff": 32,
             "dropout": 0.02,
+        },
+        "data_params": {
+            "sequence_length": 47,
+            "return_periods": [1, 4],
+            "sma_periods": [20],
+            "target_periods": [1, 4],
         },
         "fourier_params": {
             "n_bins": 16,
@@ -20,9 +27,11 @@ all_configs = {
             "bin_edges": torch.linspace(-0.1, 0.1, 16 + 1)  # Edges from -0.1 to 0.1
         },
         "train_params": {
-            "n_epochs": 20,
+            "epochs": 20,
             "learning_rate": 1e-3,
             "batch_size": 128,
+            "patience": 10,
+            "max_checkpoints": 3,
             "prefix": "test_fourier",
         },
     },
@@ -43,7 +52,21 @@ all_configs = {
             "n_heads": 4,
             "n_layers": 8,
             "d_ff": 128,
-            "dropout": 0.05
+            "dropout": 0.02
+        },
+        "data_params": {
+            "sequence_length": 47,
+            "return_periods": [1, 2, 3, 4],
+            "sma_periods": [20],
+            "target_periods": [1, 2, 3, 4],
+        },
+        "train_params": {
+            "epochs": 250,
+            "learning_rate": 3e-5,
+            "batch_size": 128,
+            "patience": 8,
+            "max_checkpoints": 3,
+            "prefix": "mpv000",
         },
     },
 

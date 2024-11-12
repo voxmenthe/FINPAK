@@ -2,7 +2,9 @@ from torch.utils.data import DataLoader
 import torch
 from typing import Tuple, List
 from stock_dataset import StockDataset
-from preprocessing import create_stock_features, combine_price_series
+from mf_preprocessing import create_stock_features
+from preprocessing import combine_price_series
+
 
 def create_dataloaders(
     train_prices: torch.Tensor,
@@ -30,13 +32,18 @@ def create_dataloaders(
         target_periods: List of periods for target returns
         debug: Whether to print debug information
     """
+    if config is not None:
+        bin_edges = config['fourier_params']['bin_edges']
+    else:
+        bin_edges = None
+    
     # Process features for training data
     train_features = create_stock_features(
         prices=train_prices,
         return_periods=return_periods,
         sma_periods=sma_periods,
         target_periods=target_periods,
-        bin_edges=config['fourier_params']['bin_edges'],
+        bin_edges=bin_edges,
         debug=debug
     )
     
@@ -46,7 +53,7 @@ def create_dataloaders(
         return_periods=return_periods,
         sma_periods=sma_periods,
         target_periods=target_periods,
-        bin_edges=config['fourier_params']['bin_edges'],
+        bin_edges=bin_edges,
         debug=debug
     )
     

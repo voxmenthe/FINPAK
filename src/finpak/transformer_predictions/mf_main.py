@@ -24,20 +24,23 @@ device = get_device()
 
 if __name__ == "__main__":
     print(f"Using device: {device}")
-    epochs = 15000
-    max_checkpoints = 12
-    sequence_length = 47
-    batch_size = 128 #32 # try more?
-    patience = 48
-    learning_rate = 3e-5
-    # Set this to a checkpoint file path to resume training or None to start from scratch
-    checkpoint_path = None #'mpv1a_e99_valloss_0.0033764.pt' # 'mpv1a_e_77_valloss_0.0024084.pt' # 'mpv000_e245_valloss_0.0016670.pt' # None # 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  
-    return_periods=[1, 2, 3, 4, 6, 12]
-    sma_periods=[20]
-    target_periods=[1, 2, 3, 4, 6, 12]
-    DEBUG = True
 
     CONFIG = all_configs['test_fourier']
+
+    epochs = CONFIG['train_params']['epochs']
+    max_checkpoints = CONFIG['train_params']['max_checkpoints']
+    batch_size = CONFIG['train_params']['batch_size']
+    patience = CONFIG['train_params']['patience']
+    learning_rate = CONFIG['train_params']['learning_rate']
+
+    sequence_length = CONFIG['data_params']['sequence_length']
+    return_periods = CONFIG['data_params']['return_periods']
+    sma_periods = CONFIG['data_params']['sma_periods']
+    target_periods = CONFIG['data_params']['target_periods']
+    
+    # Set this to a checkpoint file path to resume training or None to start from scratch
+    checkpoint_path = None #'mpv1a_e99_valloss_0.0033764.pt' # 'mpv1a_e_77_valloss_0.0024084.pt' # None #
+    DEBUG = True
 
     MODEL_PARAMS = CONFIG['model_params']
     prefix = CONFIG['train_params']['prefix']
@@ -47,24 +50,24 @@ if __name__ == "__main__":
     # unsure: 
     train_tickers = [
         'AAPL', 'AAL', 'AMZN', 'AVGO', 'ADBE', 'AXP', 
-        'BA', 'BIIB', 'CLX', 'CMG', 'CRM', 'DIS', 'DE',
-        'EBAY', 'ED', 'FDX',
-        'GM', 'GD', 'GDX', 'GOOGL', 'GS', 'HD',
-        'IBM', 'INTC','ISRG', 
-        'JNJ', 'JPM', 
-        'KRE', 'KO',
-        'LEN', 'LLY','LMT', 'LULU', 'LVS',
-        'NOW', 'ORCL',
-        'PG', 'MA', 'META', 'MGM','MS', 'MSFT', 'NVDA',
-        'OXY', 'PANW',
-        'LUV', 'PYPL', 
-        'SBUX', 'SCHW', 'SMH',
-        'TEVA', 'TGT','TOL', 'TSLA',
-        'UAL', 'UNH', 'UPS',
-        'WBA', 'WMT', 
+        # 'BA', 'BIIB', 'CLX', 'CMG', 'CRM', 'DIS', 'DE',
+        # 'EBAY', 'ED', 'FDX',
+        # 'GM', 'GD', 'GDX', 'GOOGL', 'GS', 'HD',
+        # 'IBM', 'INTC','ISRG', 
+        # 'JNJ', 'JPM', 
+        # 'KRE', 'KO',
+        # 'LEN', 'LLY','LMT', 'LULU', 'LVS',
+        # 'NOW', 'ORCL',
+        # 'PG', 'MA', 'META', 'MGM','MS', 'MSFT', 'NVDA',
+        # 'OXY', 'PANW',
+        # 'LUV', 'PYPL', 
+        # 'SBUX', 'SCHW', 'SMH',
+        # 'TEVA', 'TGT','TOL', 'TSLA',
+        # 'UAL', 'UNH', 'UPS',
+        # 'WBA', 'WMT', 
     ]
     
-    val_tickers = ['UAL', 'SNOW', 'CRWD', 'IBKR', 'AMD', 'COIN'] # 'FTNT', 'CRWD', 'CAVA', 'AMD', 'SNOW', 'UAL', 'DKNG',  # Validation tickers
+    val_tickers = ['UAL', 'SNOW'], #, 'CRWD', 'IBKR', 'AMD', 'COIN'] # 'FTNT', 'CRWD', 'CAVA', 'AMD', 'SNOW', 'UAL', 'DKNG',  # Validation tickers
     
     start_date = '1990-01-01'
     end_date = '2024-11-05'
@@ -95,17 +98,20 @@ if __name__ == "__main__":
     combined_train_prices = combine_price_series(train_price_series)
     combined_val_prices = combine_price_series(val_price_series)
     
+    # Add this debug print
+    print("Config return periods:", CONFIG['data_params']['return_periods'])
+    
     # Create dataloaders with separate train/val prices
     train_loader, val_loader, feature_names, target_names = create_dataloaders(
         train_prices=combined_train_prices,
         val_prices=combined_val_prices,
         batch_size=batch_size,
         sequence_length=sequence_length,
-        return_periods=return_periods,
+        return_periods=return_periods,  # Verify this is coming from config
         sma_periods=sma_periods,
         target_periods=target_periods,
         num_workers=16,
-        training_config=CONFIG,
+        config=CONFIG,
         debug=DEBUG
     )
     

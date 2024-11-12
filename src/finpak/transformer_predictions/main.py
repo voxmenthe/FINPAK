@@ -7,6 +7,7 @@ import os
 from finpak.data.fetchers.yahoo import download_multiple_tickers
 from finpak.transformer_predictions.preprocessing import combine_price_series, normalize_features
 
+from configs import all_configs
 
 def get_device():
   if torch.backends.mps.is_available():
@@ -23,69 +24,27 @@ device = get_device()
 
 if __name__ == "__main__":
     print(f"Using device: {device}")
-    epochs = 15000
-    max_checkpoints = 12
-    sequence_length = 47
-    batch_size = 128 #32 # try more?
-    patience = 48
-    learning_rate = 3e-5
-    # Set this to a checkpoint file path to resume training or None to start from scratch
-    checkpoint_path = None #'mpv1a_e99_valloss_0.0033764.pt' # 'mpv1a_e_77_valloss_0.0024084.pt' # 'mpv000_e245_valloss_0.0016670.pt' # None # 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  
-    return_periods=[1, 2, 3, 4, 6, 12]
-    sma_periods=[20]
-    target_periods=[1, 2, 3, 4, 6, 12]
+
+    CONFIG = all_configs['v000']
+
+    epochs = CONFIG['train_params']['epochs']
+    max_checkpoints = CONFIG['train_params']['max_checkpoints']
+    batch_size = CONFIG['train_params']['batch_size']
+    patience = CONFIG['train_params']['patience']
+    learning_rate = CONFIG['train_params']['learning_rate']
+
+    sequence_length = CONFIG['data_params']['sequence_length']
+    return_periods = CONFIG['data_params']['return_periods']
+    sma_periods = CONFIG['data_params']['sma_periods']
+    target_periods = CONFIG['data_params']['target_periods']
+    
     DEBUG = True
 
-    model_params_v0 = {
-        "d_model": 512,
-        "n_heads": 4,
-        "n_layers": 56,
-        "d_ff": 2048,
-        "dropout": 0.12,
-    }
+    MODEL_PARAMS = CONFIG['model_params']
+    prefix = CONFIG['train_params']['prefix']
 
-    model_params_v000 = {
-        "d_model": 128,
-        "n_heads": 4,
-        "n_layers": 8,
-        "d_ff": 128,
-        "dropout": 0.05
-    }
-
-    model_params_v1 = {
-        "d_model": 1024,
-        "n_heads": 8,
-        "n_layers": 88,
-        "d_ff": 2048,
-        "dropout": 0.32,
-    }
-
-    model_params_v1a = {
-        "d_model": 1024,
-        "n_heads": 8,
-        "n_layers": 88,
-        "d_ff": 3072,
-        "dropout": 0.23,
-    }
-
-    model_params_v1b = {
-        "d_model": 2048,
-        "n_heads": 16,
-        "n_layers": 88,
-        "d_ff": 3072,
-        "dropout": 0.28,
-    }
-
-    model_params_v2 = {
-        "d_model": 2048,
-        "n_heads": 32,
-        "n_layers": 96,
-        "d_ff": 8192,
-        "dropout": 0.12,
-    }
-
-    MODEL_PARAMS = model_params_v1b
-    prefix = 'mpv1b'
+    # Set this to a checkpoint file path to resume training or None to start from scratch
+    checkpoint_path = None #'mpv1a_e99_valloss_0.0033764.pt' # 'mpv1a_e_77_valloss_0.0024084.pt' # 'mpv000_e245_valloss_0.0016670.pt' # None # 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  
 
     # Split tickers into training and validation sets
     # negative: 'WBA', 'LVS',

@@ -69,6 +69,7 @@ def create_stock_features(
     
     if debug:
         print("\nCalculating target returns:")
+    
     for period in target_periods:
         returns = calculate_returns(prices, period, debug=debug)
         # Shift returns back by period to align with current time
