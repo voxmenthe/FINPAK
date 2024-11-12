@@ -49,7 +49,7 @@ if __name__ == "__main__":
     # Split tickers into training and validation sets
     # negative: 'WBA', 'LVS',
     # unsure: 
-    train_tickers = [
+    train_tickers_v1 = [
         'AAPL', 'AAL', 'AMZN', 'AVGO', 'ADBE', 'AXP', 
         'BA', 'BIIB', 'CLX', 'CMG', 'CRM', 'DIS', 'DE',
         'EBAY', 'ED', 'FDX',
@@ -68,29 +68,34 @@ if __name__ == "__main__":
         'WBA', 'WMT', 
     ]
     
-    val_tickers = ['UAL', 'SNOW', 'CRWD', 'IBKR', 'AMD', 'COIN'] # 'FTNT', 'CRWD', 'CAVA', 'AMD', 'SNOW', 'UAL', 'DKNG',  # Validation tickers
+    val_tickers_v1 = ['UAL', 'SNOW', 'CRWD', 'IBKR', 'AMD', 'COIN'] # 'FTNT', 'CRWD', 'CAVA', 'AMD', 'SNOW', 'UAL', 'DKNG',  # Validation tickers
     
     start_date = '1990-01-01'
     end_date = '2024-11-05'
 
-    # Download and process training data
-    train_df = download_multiple_tickers(train_tickers, start_date, end_date)
-    train_df = train_df.loc[:,'Adj Close']
+    # Check if the dataframes already exist
+    if not os.path.exists('train_df_v1.csv'):
+        # Download and process training data
+        train_df = download_multiple_tickers(train_tickers_v1, start_date, end_date)
+        train_df = train_df.loc[:,'Adj Close']
+        train_df.to_csv('train_df_v1.csv')
     
-    # Download and process validation data
-    val_df = download_multiple_tickers(val_tickers, start_date, end_date)
-    val_df = val_df.loc[:,'Adj Close']
+    if not os.path.exists('val_df_v1.csv'):
+        # Download and process validation data
+        val_df = download_multiple_tickers(val_tickers_v1, start_date, end_date)
+        val_df = val_df.loc[:,'Adj Close']
+        val_df.to_csv('val_df_v1.csv')
 
     # Process training price series
     train_price_series = []
-    for ticker in train_tickers:
+    for ticker in train_tickers_v1:
         prices = train_df[ticker]
         price_tensor = torch.tensor(prices.to_numpy(), dtype=torch.float32)
         train_price_series.append(price_tensor)
     
     # Process validation price series
     val_price_series = []
-    for ticker in val_tickers:
+    for ticker in val_tickers_v1:
         prices = val_df[ticker]
         price_tensor = torch.tensor(prices.to_numpy(), dtype=torch.float32)
         val_price_series.append(price_tensor)
@@ -115,8 +120,8 @@ if __name__ == "__main__":
     if DEBUG:
         # Add logging
         print("\nDataset Information:")
-        print(f"Training tickers: {train_tickers}")
-        print(f"Validation tickers: {val_tickers}")
+        print(f"Training tickers: {train_tickers_v1}")
+        print(f"Validation tickers: {val_tickers_v1}")
         print(f"\nTraining series length: {len(combined_train_prices)}")
         print(f"Validation series length: {len(combined_val_prices)}")
         print(f"\nNumber of features: {len(feature_names)}")
