@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from torch.utils.data import DataLoader
 import os
 from heapq import heappush, heappushpop
@@ -18,6 +18,7 @@ def train_model(
     learning_rate: float = 1e-4,
     device: torch.device = torch.device("cpu"),
     warmup_steps: int = 1000,
+    decay_step_multiplier: Optional[int] = None,
     max_checkpoints: int = 3,
     checkpoint_dir: str = "checkpoints",
     prefix: str = 'mpv',
@@ -48,12 +49,29 @@ def train_model(
         weight_decay=0.1
     )
     
-    # Learning rate scheduler with warmup
-    def lr_lambda(step):
-        if step < warmup_steps:
-            return step / warmup_steps
-        return 0.5 * (1 + np.cos((step - warmup_steps) * np.pi / n_epochs))
-        
+
+    if decay_step_multiplier:
+        # Learning rate scheduler with fixed decay period
+        def lr_lambda(step):
+            peak_step: int = warmup_steps
+            # Define decay period as multiple of warmup period (e.g., 10x longer than warmup)
+            decay_steps: int = peak_step * decay_step_multiplier  
+            
+            if step < peak_step:
+                # Linear warmup to 1.0 at peak_step
+                return step / peak_step
+            else:
+                # Cosine decay over fixed period after peak
+                steps_after_peak = step - peak_step
+                progress = min(1.0, steps_after_peak / decay_steps)  # clamp to 1.0 max
+                return 0.5 * (1 + np.cos(progress * np.pi))
+    else:
+        # Learning rate scheduler with warmup
+        def lr_lambda(step):
+            if step < warmup_steps:
+                return step / warmup_steps
+            return 0.5 * (1 + np.cos((step - warmup_steps) * np.pi / n_epochs))
+
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
     
     train_losses = []
@@ -139,7 +157,8 @@ def train_model(
             break
         
         if (epoch + 1) % 10 == 0:
-            print(f"Epoch {epoch+1}/{n_epochs}")
+            current_step = epoch * len(train_loader)  # Calculate current step
+            print(f"Epoch: {epoch+1}/{n_epochs} (Step: {current_step})")
             print(f"Training loss: {train_losses[-1]:.7f}")
             print(f"Validation loss: {val_losses[-1]:.7f}")
             print(f"Learning rate: {scheduler.get_last_lr()[0]:.2e}")

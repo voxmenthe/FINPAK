@@ -47,6 +47,9 @@ def create_stock_features(
     return_periods: List[int] = [1, 5],
     sma_periods: List[int] = [20],
     target_periods: List[int] = [1, 5],
+    use_volatility: bool = False,
+    use_momentum: bool = False,
+    momentum_periods: List[int] = [9, 28, 47],
     debug: bool = False
 ) -> StockFeatures:
     """
@@ -75,6 +78,25 @@ def create_stock_features(
         sma_diff = (prices - sma) / sma
         feature_list.append(sma_diff)
         feature_names.append(f'sma{period}_diff')
+    
+    if use_volatility:
+        # Add realized volatility features
+        for period in return_periods:
+            returns = calculate_returns(prices, period)
+            volatility = torch.zeros_like(returns)
+            for i in range(period, len(returns)):
+                volatility[i] = returns[i-period:i].std()
+            feature_list.append(volatility)
+            feature_names.append(f'{period}d_volatility')
+    
+    if use_momentum:
+        # Add momentum indicators
+        for period in momentum_periods:  # Common momentum periods
+            momentum = calculate_returns(prices, period)
+            # Smooth momentum to reduce noise
+            momentum = calculate_sma(momentum, window=5)
+            feature_list.append(momentum)
+            feature_names.append(f'{period}d_momentum')
     
     # Stack features
     features = torch.stack(feature_list, dim=1)
