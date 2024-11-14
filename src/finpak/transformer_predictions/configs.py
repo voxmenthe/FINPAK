@@ -11,7 +11,7 @@ all_configs = {
             "d_ff": 512,
             "dropout": 0.02,
             "use_multi_scale": True,
-            "use_relative_pos": True,
+            "use_relative_pos": False,
             "temporal_scales": [1, 2, 4]
         },
         "data_params": {
@@ -31,7 +31,72 @@ all_configs = {
             "batch_size": 128,
             "patience": 32,
             "max_checkpoints": 5,
-            "prefix": "mpvMS000rp", # relative positional encoding
+            "prefix": "mpvMS0001",
+        },
+    },
+
+    "vMS0002": {
+        "model_params": {
+            "d_model": 256,
+            "n_heads": 16, 
+            "n_layers": 16,
+            "d_ff": 256,
+            "dropout": 0.02,
+            "use_multi_scale": False,
+            "use_relative_pos": False,
+            "temporal_scales": [1, 4, 6] # try longer temporal scales
+        },
+        "data_params": {
+            "sequence_length": 34,
+            "return_periods": [1, 2, 3, 4, 6],
+            "sma_periods": [20],
+            "target_periods": [1, 2, 3, 4, 6],
+            "use_volatility": True,
+            "use_momentum": True,
+            "momentum_periods": [6, 12]
+        },
+        "train_params": {
+            "epochs": 640,
+            "learning_rate": 3e-5, # try 4 or 5e-5
+            "warmup_steps": 2000,
+            "decay_step_multiplier": 12,
+            "batch_size": 128,
+            "patience": 88,
+            "max_checkpoints": 5,
+            "prefix": "mpvMS0002", # no relative positional encoding
+        },
+    },
+
+    "vMS0003": {
+        "model_params": {
+            "d_model": 256,
+            "n_heads": 16, 
+            "n_layers": 16,
+            "d_ff": 512,
+            "dropout": 0.02,
+            "use_multi_scale": False,
+            "use_relative_pos": False,
+            "temporal_scales": [1, 4, 6] # try longer temporal scales
+        },
+        "data_params": {
+            "sequence_length": 34,
+            "return_periods": [1, 2, 3, 4, 6],
+            "sma_periods": [20],
+            "target_periods": [1, 2, 3, 4, 6],
+            "use_volatility": True,
+            "use_momentum": True,
+            "momentum_periods": [6, 12]
+        },
+        "train_params": {
+            "epochs": 640,
+            "learning_rate": 1e-3, # try 4 or 5e-5
+            "weight_decay": 0.02,
+            "warmup_steps": 35000,
+            "decay_step_multiplier": 0.7,
+            "batch_size": 128,
+            "patience": 32,
+            "max_checkpoints": 5,
+            "prefix": "mpvMS0003", # no relative positional encoding
         },
     },
 

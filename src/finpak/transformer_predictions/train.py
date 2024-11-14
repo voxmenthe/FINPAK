@@ -24,7 +24,8 @@ def train_model(
     prefix: str = 'mpv',
     patience: int = 7,
     min_delta: float = 0.0,
-    start_epoch: int = 0
+    start_epoch: int = 0,
+    config: Optional[dict] = None
 ) -> Tuple[List[float], List[float]]:
     """
     Train the model with learning rate warmup and save the best checkpoints
@@ -34,9 +35,29 @@ def train_model(
     """
     # Create checkpoint directory if it doesn't exist
     os.makedirs(checkpoint_dir, exist_ok=True)
+
+    if config is not None:
+        weight_decay = config['train_params']['weight_decay']
+    else:
+        weight_decay = 0.1
+
+    # Calculate the minimum steps before early stopping can trigger
+    steps_per_epoch = len(train_loader)
+    min_steps_before_stopping = warmup_steps
+
+    if decay_step_multiplier:
+        # Add half of the decay period
+        min_steps_before_stopping += (warmup_steps * decay_step_multiplier) // 2
     
-    # Initialize early stopping
-    early_stop = EarlyStopping(patience=patience, min_delta=min_delta, max_checkpoints=max_checkpoints)
+    min_epochs_before_stopping = min_steps_before_stopping // steps_per_epoch
+
+    # Initialize early stopping with the minimum epochs requirement
+    early_stop = EarlyStopping(
+        patience=patience,
+        min_delta=min_delta,
+        max_checkpoints=max_checkpoints,
+        min_epochs=min_epochs_before_stopping
+    )
     
     # Initialize heap for keeping track of best models (max heap using negative loss)
     best_models = []
@@ -46,7 +67,7 @@ def train_model(
         model.parameters(),
         lr=learning_rate,
         betas=(0.9, 0.95),
-        weight_decay=0.1
+        weight_decay=weight_decay
     )
     
 
@@ -55,7 +76,7 @@ def train_model(
         def lr_lambda(step):
             peak_step: int = warmup_steps
             # Define decay period as multiple of warmup period (e.g., 10x longer than warmup)
-            decay_steps: int = peak_step * decay_step_multiplier  
+            decay_steps: int = int(peak_step * decay_step_multiplier)  
             
             if step < peak_step:
                 # Linear warmup to 1.0 at peak_step

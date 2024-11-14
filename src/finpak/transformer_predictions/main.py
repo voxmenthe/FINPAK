@@ -27,7 +27,7 @@ device = get_device()
 if __name__ == "__main__":
     print(f"Using device: {device}")
 
-    CONFIG = all_configs['vMS0001']
+    CONFIG = all_configs['vMS0003']
     # Set this to a checkpoint file path to resume training or None to start from scratch
     checkpoint_path = None #'checkpoints/mpv005a_v2_e123_valloss_0.0020898.pt' # 'checkpoints/mpv005_v2_e81_valloss_0.0019177.pt' # None #'mpv1a_e99_valloss_0.0033764.pt' # 'mpv1a_e_77_valloss_0.0024084.pt' # 'mpv000_e245_valloss_0.0016670.pt' # None # 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  
 
@@ -109,7 +109,7 @@ if __name__ == "__main__":
         sma_periods=sma_periods,
         target_periods=target_periods,
         num_workers=16,
-        debug=DEBUG
+        debug=DEBUG,
     )
     
     if DEBUG:
@@ -160,4 +160,5 @@ if __name__ == "__main__":
         prefix=prefix,  # Pass the start epoch to resume training,
         warmup_steps=warmup_steps,
         decay_step_multiplier=decay_step_multiplier,
+        config=CONFIG
     )

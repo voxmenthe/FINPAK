@@ -4,7 +4,7 @@ from typing import List, Tuple, Optional
 import numpy as np
 from pathlib import Path
 
-from timeseries_decoder import TimeSeriesDecoder
+from timeseries_decoder_v3 import TimeSeriesDecoder
 from preprocessing import create_stock_features, normalize_features
 
 
@@ -341,8 +341,8 @@ def predict_from_checkpoint(
             initial_sequence,
             n_steps,
             device,
-            return_periods,
-            sma_periods,
+            return_period=return_periods,
+            sma_period=sma_periods,
             use_multi_horizon=use_multi_horizon,
             horizon_weights=horizon_weights,
             use_forcing=use_forcing,
