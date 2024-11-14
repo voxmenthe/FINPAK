@@ -70,16 +70,16 @@ all_configs = {
     "vMS0003": {
         "model_params": {
             "d_model": 256,
-            "n_heads": 16, 
+            "n_heads": 32, 
             "n_layers": 16,
             "d_ff": 512,
             "dropout": 0.02,
-            "use_multi_scale": False,
+            "use_multi_scale": False, # next try True with [1, 2, 4] or something similar
             "use_relative_pos": False,
             "temporal_scales": [1, 4, 6] # try longer temporal scales
         },
         "data_params": {
-            "sequence_length": 34,
+            "sequence_length": 34, # try much longer and shorter sequence lengths
             "return_periods": [1, 2, 3, 4, 6],
             "sma_periods": [20],
             "target_periods": [1, 2, 3, 4, 6],
@@ -88,10 +88,11 @@ all_configs = {
             "momentum_periods": [6, 12]
         },
         "train_params": {
-            "epochs": 640,
-            "learning_rate": 1e-3, # try 4 or 5e-5
-            "weight_decay": 0.02,
-            "warmup_steps": 35000,
+            "epochs": 1800,
+            "learning_rate": 5e-3, # previous 1e-3
+            "initial_learning_rate": 1e-6,
+            "weight_decay": 0.07, # previous 0.02
+            "warmup_steps": 80000,
             "decay_step_multiplier": 0.7,
             "batch_size": 128,
             "patience": 32,

@@ -47,6 +47,7 @@ if __name__ == "__main__":
     batch_size = CONFIG['train_params']['batch_size']
     patience = CONFIG['train_params']['patience']
     learning_rate = CONFIG['train_params']['learning_rate']
+    initial_learning_rate = CONFIG['train_params']['initial_learning_rate']
     warmup_steps = CONFIG['train_params']['warmup_steps']
     decay_step_multiplier = CONFIG['train_params']['decay_step_multiplier']
 
@@ -156,6 +157,7 @@ if __name__ == "__main__":
         patience=patience,
         device=device,
         learning_rate=learning_rate,
+        initial_learning_rate=initial_learning_rate,
         start_epoch=start_epoch,
         prefix=prefix,  # Pass the start epoch to resume training,
         warmup_steps=warmup_steps,

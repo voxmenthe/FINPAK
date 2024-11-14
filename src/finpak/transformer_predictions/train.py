@@ -16,6 +16,7 @@ def train_model(
     val_loader: DataLoader,
     n_epochs: int = 100,
     learning_rate: float = 1e-4,
+    initial_learning_rate: Optional[float] = None,
     device: torch.device = torch.device("cpu"),
     warmup_steps: int = 1000,
     decay_step_multiplier: Optional[int] = None,
@@ -69,7 +70,9 @@ def train_model(
         betas=(0.9, 0.95),
         weight_decay=weight_decay
     )
-    
+
+    if initial_learning_rate is None:
+        initial_learning_rate = learning_rate / 100   
 
     if decay_step_multiplier:
         # Learning rate scheduler with fixed decay period
@@ -79,18 +82,20 @@ def train_model(
             decay_steps: int = int(peak_step * decay_step_multiplier)  
             
             if step < peak_step:
-                # Linear warmup to 1.0 at peak_step
-                return step / peak_step
+                # Linear warmup from initial_learning_rate to learning_rate
+                warmup_factor = step / peak_step
+                return (initial_learning_rate + (learning_rate - initial_learning_rate) * warmup_factor) / learning_rate
             else:
                 # Cosine decay over fixed period after peak
                 steps_after_peak = step - peak_step
-                progress = min(1.0, steps_after_peak / decay_steps)  # clamp to 1.0 max
+                progress = min(1.0, steps_after_peak / decay_steps)
                 return 0.5 * (1 + np.cos(progress * np.pi))
     else:
-        # Learning rate scheduler with warmup
         def lr_lambda(step):
             if step < warmup_steps:
-                return step / warmup_steps
+                # Linear warmup from initial_learning_rate to learning_rate
+                warmup_factor = step / warmup_steps
+                return (initial_learning_rate + (learning_rate - initial_learning_rate) * warmup_factor) / learning_rate
             return 0.5 * (1 + np.cos((step - warmup_steps) * np.pi / n_epochs))
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
