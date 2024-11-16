@@ -1,3 +1,4 @@
+# flake8: noqa E501
 import torch
 
 
@@ -94,11 +95,187 @@ all_configs = {
             "weight_decay": 0.07, # previous 0.02
             "warmup_steps": 80000,
             "decay_step_multiplier": 0.7,
+            "enable_lr_adaptation": True,  # Enable adaptive learning rate
+            "lr_acceleration_factor": 1.2,  # Increase learning rate by 20% when improving
+            "lr_deceleration_factor": 0.8,  # Decrease learning rate by 20% when stagnating
+            "lr_adaptation_epochs": 5,  # Wait 5 epochs before adapting learning rate
+            "min_lr": 1e-6,  # Minimum learning rate
+            "max_lr": 1e-3,  # Maximum learning rate
             "batch_size": 128,
             "patience": 32,
             "max_checkpoints": 5,
             "prefix": "mpvMS0003", # no relative positional encoding
         },
+    },
+
+    "vMS0003a": {
+        "model_params": {
+            "d_model": 256,
+            "n_heads": 32,
+            "n_layers": 16,
+            "d_ff": 512,
+            "dropout": 0.02,
+            "use_multi_scale": False,  # next try True with [1, 2, 4] or something similar
+            "use_relative_pos": False,
+            "temporal_scales": [1, 4, 6]  # try longer temporal scales
+        },
+        "data_params": {
+            "sequence_length": 34,  # try much longer and shorter sequence lengths
+            "return_periods": [1, 2, 3, 4, 6],
+            "sma_periods": [20],
+            "target_periods": [1, 2, 3, 4, 6],
+            "use_volatility": True,
+            "use_momentum": True,
+            "momentum_periods": [6, 12]
+        },
+        "train_params": {
+            "seed": 42,  
+            "epochs": 1800,
+            "batch_size": 128,
+            "patience": 32,
+            "max_checkpoints": 5,
+            "min_delta": 0.0,  # Minimum change in loss to be considered an improvement
+            "learning_rate": 5e-3,
+            "initial_learning_rate": 1e-7,
+            "weight_decay": 0.07,
+            "warmup_steps": 80000,
+            "decay_step_multiplier": 0.7,
+            "enable_lr_adaptation": True,
+            "lr_acceleration_factor": 2.0,
+            "lr_deceleration_factor": 0.8,
+            "lr_adaptation_epochs": 3,
+            "min_lr": 1e-7,
+            "max_lr": 1e-2,
+            "prefix": "mpvMS0003a",
+        }
+    },
+
+    "vMS0003b": {
+        "model_params": {
+            "d_model": 256,
+            "n_heads": 32,
+            "n_layers": 16,
+            "d_ff": 512,
+            "dropout": 0.05,
+            "use_multi_scale": False,  # next try True with [1, 2, 4] or something similar
+            "use_relative_pos": False,
+            "temporal_scales": [1, 4, 6]  # try longer temporal scales
+        },
+        "data_params": {
+            "sequence_length": 34,  # try much longer and shorter sequence lengths
+            "return_periods": [1, 2, 3, 4, 6],
+            "sma_periods": [20],
+            "target_periods": [1, 2, 3, 4, 6],
+            "use_volatility": True,
+            "use_momentum": True,
+            "momentum_periods": [6, 12]
+        },
+        "train_params": {
+            "seed": 6657,  
+            "epochs": 1800,
+            "batch_size": 64,
+            "patience": 32,
+            "max_checkpoints": 5,
+            "min_delta": 0.0,  # Minimum change in loss to be considered an improvement
+            "learning_rate": 4e-4,
+            "initial_learning_rate": 1e-8,
+            "weight_decay": 0.2,
+            "warmup_steps": 180000,
+            "decay_step_multiplier": 0.7,
+            "enable_lr_adaptation": True,
+            "lr_acceleration_factor": 1.1,
+            "lr_deceleration_factor": 0.8,
+            "lr_adaptation_epochs": 3,
+            "min_lr": 1e-8,
+            "max_lr": 1e-2,
+            "prefix": "mpvMS0003b",
+        }
+    },
+
+    "vMS0003c": {
+        "model_params": {
+            "d_model": 256,
+            "n_heads": 32,
+            "n_layers": 16,
+            "d_ff": 512,
+            "dropout": 0.01,
+            "use_multi_scale": False,  # next try True with [1, 2, 4] or something similar
+            "use_relative_pos": False,
+            "temporal_scales": [1, 4, 6]  # try longer temporal scales
+        },
+        "data_params": {
+            "sequence_length": 34,  # try much longer and shorter sequence lengths
+            "return_periods": [1, 2, 3, 4, 6],
+            "sma_periods": [20],
+            "target_periods": [1, 2, 3, 4, 6],
+            "use_volatility": True,
+            "use_momentum": True,
+            "momentum_periods": [6, 12]
+        },
+        "train_params": {
+            "seed": 6657,
+            "epochs": 1800,
+            "print_every": 10,
+            "batch_size": 32,
+            "patience": 32,
+            "max_checkpoints": 5,
+            "min_delta": 0.0,  # Minimum change in loss to be considered an improvement
+            "learning_rate": 4e-4,
+            "initial_learning_rate": 1e-9,
+            "weight_decay": 0.3,
+            "warmup_steps": 300_000,
+            "decay_step_multiplier": 0.7,
+            "enable_lr_adaptation": True,
+            "lr_acceleration_factor": 0.85,
+            "lr_deceleration_factor": 0.8,
+            "lr_adaptation_epochs": 6,
+            "min_lr": 1e-9,
+            "max_lr": 1e-2,
+            "prefix": "mpvMS0003c",
+        }
+    },
+
+    "vMS0003d": {
+        "model_params": {
+            "d_model": 256,
+            "n_heads": 32,
+            "n_layers": 16,
+            "d_ff": 512,
+            "dropout": 0.01,
+            "use_multi_scale": False,  # next try True with [1, 2, 4] or something similar
+            "use_relative_pos": False,
+            "temporal_scales": [1, 4, 6]  # try longer temporal scales
+        },
+        "data_params": {
+            "sequence_length": 34,  # try much longer and shorter sequence lengths
+            "return_periods": [1, 2, 3, 4, 6],
+            "sma_periods": [20],
+            "target_periods": [1, 2, 3, 4, 6],
+            "use_volatility": True,
+            "use_momentum": True,
+            "momentum_periods": [6, 12]
+        },
+        "train_params": {
+            "seed": 6657,
+            "epochs": 1800,
+            "print_every": 10,
+            "batch_size": 32,
+            "patience": 32,
+            "max_checkpoints": 5,
+            "min_delta": 0.0,  # Minimum change in loss to be considered an improvement
+            "learning_rate": 6e-4,
+            "initial_learning_rate": 1e-9,
+            "weight_decay": 0.45,
+            "warmup_steps": 500_000,
+            "decay_step_multiplier": 0.7,
+            "enable_lr_adaptation": True,
+            "lr_acceleration_factor": 0.75,
+            "lr_deceleration_factor": 0.8,
+            "lr_adaptation_epochs": 6,
+            "min_lr": 1e-9,
+            "max_lr": 1e-2,
+            "prefix": "mpvMS0003d",
+        }
     },
 
     "test_fourier": {
@@ -509,9 +686,11 @@ train_tickers_v3 = [
 
 val_tickers_v3 = ['UAL', 'SNOW', 'PLTR', 'SHOP', 'CRWD', 'IBKR', 'FTNT', 'CRWD', 'CAVA', 'IBIT', 'DKNG']  # Validation tickers  
 
+
 train_tickers_v4 = [
     'AAPL', 'AAL', 'AMD', 'AMZN', 'AVGO', 'ADBE', 'AXP', 
-    'BA', 'BIIB', 'CLX', 'CMG', 'COIN', 'CRM', 'DIS', 'DE',
+    'BA', 'BIIB', 'CLX', 'CMG', 'COIN', 'CRM', 
+    'DAL','DIS', 'DE',
     'EBAY', 'ED', 'F','FDX',
     'GM', 'GD', 'GDX', 'GOOGL', 'GS', 
     'H', 'HD', 'HEES', 'HON',
@@ -519,12 +698,17 @@ train_tickers_v4 = [
     'JNJ', 'JPM', 
     'KRE', 'KO',
     'LEN', 'LLY','LMT', 'LULU', 'LUV', 'LVS',
-    'MA', 'META', 'MGM','MS', 'MSFT', 'MSTR', 'MU',
-    'NVDA', 'NOW', 'ORCL', 'OXY', 'PANW', 'PG', 'PYPL', 
+    'MA', 'MCD', 'META', 'MGM','MS', 'MSFT', 'MSTR', 'MU',
+    'NOW', 'NVDA', 'NVO', 
+    'ORCL', 'OXY', 'PANW', 
+    'PG', 'PYPL', 'QCOM',
     'SBUX', 'SCHW', 'SMH',
     'TEVA', 'TGT','TOL', 'TSLA',
-    'UAL', 'UNH', 'UPS', 'V'
-    'WBA', 'WMT', 'X', 'XOM'
+    'UBER','UAL', 'UNH', 'UPS', 'V'
+    'WBA', 'WMT', 'X', 'XHB','XOM'
 ]
 
-val_tickers_v4 = ['SNOW', 'PLTR', 'SHOP', 'CRWD', 'IBKR', 'FTNT', 'CRWD', 'CAVA', 'IBIT', 'AMGN', 'DKNG']  # Validation tickers  
+val_tickers_v4 = [
+    'SNOW', 'PANW', 'PLTR', 'LYFT','SHOP', 
+    'CRWD', 'IBKR', 'FTNT', 'CRWD', 'CAVA', 
+    'IBIT', 'AMGN', 'DKNG'] # 'SNAP', 'SOFI'

@@ -1,13 +1,19 @@
 class EarlyStopping:
     def __init__(self, patience=7, min_delta=0, mode='min', max_checkpoints=3, min_epochs=0):
         """
-        Early stopping to stop the training when the loss does not improve after
-        certain epochs.
+        Early stopping to halt training when the loss doesn't improve after
+        certain epochs, with additional features:
+        
+        1. Maintains a list of best models
+        2. Enforces a minimum number of epochs before stopping
+        3. Tracks recent losses for trend analysis
         
         Args:
             patience (int): Number of epochs to wait before stopping after last improvement
             min_delta (float): Minimum change in monitored value to qualify as an improvement
             mode (str): 'min' for loss, 'max' for metrics like accuracy
+            max_checkpoints (int): Maximum number of best checkpoints to keep
+            min_epochs (int): Minimum number of epochs before allowing early stopping
         """
         self.patience = patience
         self.min_delta = min_delta
@@ -21,6 +27,8 @@ class EarlyStopping:
         self.max_checkpoints = max_checkpoints  # Use max_checkpoints for best losses
         self.min_epochs = min_epochs
         self.current_epoch = 0
+        self.epochs_since_improvement = 0  # Track epochs since last improvement
+        self.last_improvement_epoch = 0  # Track when we last saw an improvement
 
     def __call__(self, current_loss):
         self.current_epoch += 1
@@ -31,6 +39,7 @@ class EarlyStopping:
 
         if self.best_loss is None:
             self.best_loss = current_loss
+            self.last_improvement_epoch = self.current_epoch
             return False
         
         if self.mode == 'min':
@@ -41,8 +50,11 @@ class EarlyStopping:
         if delta < self.min_delta:
             self.best_loss = current_loss
             self.counter = 0
+            self.epochs_since_improvement = 0
+            self.last_improvement_epoch = self.current_epoch
         else:
             self.counter += 1
+            self.epochs_since_improvement += 1
             if self.counter >= self.patience:
                 self.early_stop = True
                 
@@ -65,4 +77,11 @@ class EarlyStopping:
         if all(loss not in self.best_losses for loss in self.recent_losses):
             self.early_stop = True
 
-        return self.early_stop 
+        return self.early_stop
+
+    def get_improvement_status(self):
+        return {
+            'epochs_since_improvement': self.epochs_since_improvement,
+            'last_improvement_epoch': self.last_improvement_epoch,
+            'early_stop': self.early_stop
+        }

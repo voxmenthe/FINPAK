@@ -27,39 +27,30 @@ device = get_device()
 if __name__ == "__main__":
     print(f"Using device: {device}")
 
-    CONFIG = all_configs['vMS0003']
+    CONFIG = all_configs['vMS0003d']
     # Set this to a checkpoint file path to resume training or None to start from scratch
     checkpoint_path = None #'checkpoints/mpv005a_v2_e123_valloss_0.0020898.pt' # 'checkpoints/mpv005_v2_e81_valloss_0.0019177.pt' # None #'mpv1a_e99_valloss_0.0033764.pt' # 'mpv1a_e_77_valloss_0.0024084.pt' # 'mpv000_e245_valloss_0.0016670.pt' # None # 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  
 
     architecture_version = '_v3'
 
-    # Split tickers into training and validation sets
-    # negative: 'WBA', 'LVS',
-    # unsure: 
     train_tickers = train_tickers_v3
     val_tickers = val_tickers_v3
     train_df_fname = 'train_df_v3.csv'
     val_df_fname = 'val_df_v3.csv'
     FORCE_RELOAD = False
 
-    epochs = CONFIG['train_params']['epochs']
-    max_checkpoints = CONFIG['train_params']['max_checkpoints']
+    # Extract only parameters needed for data loading and model initialization
     batch_size = CONFIG['train_params']['batch_size']
-    patience = CONFIG['train_params']['patience']
-    learning_rate = CONFIG['train_params']['learning_rate']
-    initial_learning_rate = CONFIG['train_params']['initial_learning_rate']
-    warmup_steps = CONFIG['train_params']['warmup_steps']
-    decay_step_multiplier = CONFIG['train_params']['decay_step_multiplier']
-
     sequence_length = CONFIG['data_params']['sequence_length']
     return_periods = CONFIG['data_params']['return_periods']
     sma_periods = CONFIG['data_params']['sma_periods']
     target_periods = CONFIG['data_params']['target_periods']
     
     DEBUG = True
-
     MODEL_PARAMS = CONFIG['model_params']
-    prefix = CONFIG['train_params']['prefix'] + f'{architecture_version}'
+    
+    # Update prefix with architecture version
+    CONFIG['train_params']['prefix'] = CONFIG['train_params']['prefix'] + f'{architecture_version}'
     
     start_date = '1990-01-01'
     end_date = '2024-11-05'
@@ -95,11 +86,11 @@ if __name__ == "__main__":
         prices = val_df[ticker]
         price_tensor = torch.tensor(prices.to_numpy(), dtype=torch.float32)
         val_price_series.append(price_tensor)
-    
+
     # Combine price series separately for train and validation
     combined_train_prices = combine_price_series(train_price_series)
     combined_val_prices = combine_price_series(val_price_series)
-    
+
     # Create dataloaders with separate train/val prices
     train_loader, val_loader, feature_names, target_names = create_dataloaders(
         train_prices=combined_train_prices,
@@ -112,7 +103,7 @@ if __name__ == "__main__":
         num_workers=16,
         debug=DEBUG,
     )
-    
+
     if DEBUG:
         # Add logging
         print("\nDataset Information:")
@@ -142,25 +133,17 @@ if __name__ == "__main__":
         model.load_state_dict(checkpoint['model_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
         print(f"Resuming training from epoch {start_epoch}")
-    
+
     # Print model size and trainable parameters
     print(f"Model size: {sum(p.numel() for p in model.parameters()):,}")
     print(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
-    
-    # Train model - pass the device and start_epoch
+
+    # Train model with simplified interface
     train_losses, val_losses = train_model(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
-        n_epochs=epochs,
-        max_checkpoints=max_checkpoints,
-        patience=patience,
         device=device,
-        learning_rate=learning_rate,
-        initial_learning_rate=initial_learning_rate,
         start_epoch=start_epoch,
-        prefix=prefix,  # Pass the start epoch to resume training,
-        warmup_steps=warmup_steps,
-        decay_step_multiplier=decay_step_multiplier,
         config=CONFIG
     )

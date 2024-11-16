@@ -118,30 +118,27 @@ def make_autoregressive_prediction(
             last_price = current_sequence[-1].item()
             
             if use_multi_horizon:
-                # Simple approach: Just use the 1-day prediction and scale down the N-day prediction
-                one_day_return = pred[0][0].item()
-                n_day_return = pred[0][1].item()  # Assuming second prediction is N-day return
-                scaled_n_day = n_day_return / return_periods[1]  # Simple linear scaling
+                # Get predictions for each horizon
+                horizon_returns = []
+                for i, period in enumerate(return_periods):
+                    # Scale down the N-day return to a daily return
+                    period_return = pred[0][i].item()
+                    daily_return = (1 + period_return) ** (1/period) - 1
+                    horizon_returns.append(daily_return)
+                    
+                    if debug and step < 2:  # Show first few steps
+                        print(f"\nStep {step} - {period}-day horizon:")
+                        print(f"Raw {period}-day return: {period_return:.4f}")
+                        print(f"Scaled daily return: {daily_return:.4f}")
                 
-                if debug:  # Print for all steps when debugging
-                    print(f"\nStep {step} diagnostics:")
-                    print(f"Raw model predictions: {raw_pred}")
-                    print(f"1-day predicted return: {one_day_return:.4f}")
-                    print(f"{return_periods[1]}-day predicted return: {n_day_return:.4f}")
-                    print(f"Scaled {return_periods[1]}-day return (daily): {scaled_n_day:.4f}")
+                # Combine predictions using horizon weights
+                next_return = sum(w * r for w, r in zip(horizon_weights, horizon_returns))
                 
-                # Simple weighted average of 1-day and scaled N-day predictions
-                next_return = (horizon_weights[0] * one_day_return + 
-                             horizon_weights[1] * scaled_n_day)
-                
-                if debug:
-                    print(f"Weights: {horizon_weights[0]:.2f} * {one_day_return:.4f} + {horizon_weights[1]:.2f} * {scaled_n_day:.4f}")
-                    print(f"Final weighted return: {next_return:.4f}")
-                    print(f"Current price: {last_price:.2f}")
-                    next_price_debug = last_price * (1 + next_return)
-                    print(f"Next price: {next_price_debug:.2f}")
-                    print(f"Price change: {(next_price_debug - last_price):.2f}")
-                    print(f"Percent change: {(next_return * 100):.2f}%")
+                if debug and step < 2:
+                    print(f"\nStep {step} combined prediction:")
+                    for period, ret, weight in zip(return_periods, horizon_returns, horizon_weights):
+                        print(f"{period}-day contribution: {weight:.2f} * {ret:.4f} = {weight * ret:.4f}")
+                    print(f"Final weighted daily return: {next_return:.4f}")
             else:
                 next_return = pred[0][0].item()
             
@@ -337,12 +334,12 @@ def predict_from_checkpoint(
         
         # Make prediction
         predictions = make_autoregressive_prediction(
-            model,
-            initial_sequence,
-            n_steps,
-            device,
-            return_period=return_periods,
-            sma_period=sma_periods,
+            model=model,
+            initial_sequence=initial_sequence,
+            n_steps=n_steps,
+            device=device,
+            return_periods=return_periods,
+            sma_periods=sma_periods,
             use_multi_horizon=use_multi_horizon,
             horizon_weights=horizon_weights,
             use_forcing=use_forcing,
