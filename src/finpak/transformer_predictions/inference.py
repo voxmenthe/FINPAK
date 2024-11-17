@@ -51,7 +51,11 @@ def make_autoregressive_prediction(
     use_forcing: bool = False,
     forcing_halflife: float = 3.0,
     true_future: Optional[torch.Tensor] = None,
-    debug: bool = False
+    debug: bool = False,
+    stability_threshold: float = 0.1,  # Max allowed daily return magnitude
+    dampening_factor: float = 0.95,    # Exponential dampening per step
+    use_ewma_smoothing: bool = True,   # Use exponential moving average
+    ewma_alpha: float = 0.7           # EWMA smoothing factor
 ) -> torch.Tensor:
     """
     Make autoregressive predictions starting from an initial sequence.
@@ -124,15 +128,35 @@ def make_autoregressive_prediction(
                     # Scale down the N-day return to a daily return
                     period_return = pred[0][i].item()
                     daily_return = (1 + period_return) ** (1/period) - 1
-                    horizon_returns.append(daily_return)
+                    
+                    # Apply dampening based on horizon length
+                    # Longer horizons get more dampening
+                    horizon_dampening = dampening_factor ** (period - 1)
+                    damped_return = daily_return * horizon_dampening
+                    
+                    horizon_returns.append(damped_return)
                     
                     if debug and step < 2:  # Show first few steps
                         print(f"\nStep {step} - {period}-day horizon:")
                         print(f"Raw {period}-day return: {period_return:.4f}")
                         print(f"Scaled daily return: {daily_return:.4f}")
+                        print(f"Dampened return: {damped_return:.4f}")
                 
                 # Combine predictions using horizon weights
                 next_return = sum(w * r for w, r in zip(horizon_weights, horizon_returns))
+                
+                # Apply stability controls
+                if abs(next_return) > stability_threshold:
+                    # Clip extreme predictions while preserving direction
+                    next_return = stability_threshold * (next_return / abs(next_return))
+                    if debug:
+                        print(f"Return exceeded threshold, clipped to: {next_return:.4f}")
+                
+                # Apply exponential moving average smoothing if enabled
+                if use_ewma_smoothing and len(predictions) > 0:
+                    prev_return = (current_sequence[-1] / current_sequence[-2] - 1).item()
+                    smoothed_return = ewma_alpha * next_return + (1 - ewma_alpha) * prev_return
+                    next_return = smoothed_return
                 
                 if debug and step < 2:
                     print(f"\nStep {step} combined prediction:")
@@ -276,7 +300,11 @@ def predict_from_checkpoint(
     horizon_weights: Optional[List[float]] = None,
     use_forcing: bool = False,
     forcing_halflife: float = 3.0,
-    debug: bool = False
+    debug: bool = False,
+    stability_threshold: float = 0.1,  # Max allowed daily return magnitude
+    dampening_factor: float = 0.95,    # Exponential dampening per step
+    use_ewma_smoothing: bool = True,   # Use exponential moving average
+    ewma_alpha: float = 0.7           # EWMA smoothing factor
 ) -> None:
     """
     Load a model from checkpoint and make/plot predictions from multiple start points.
@@ -345,7 +373,11 @@ def predict_from_checkpoint(
             use_forcing=use_forcing,
             forcing_halflife=forcing_halflife,
             true_future=true_future,
-            debug=debug
+            debug=debug,
+            stability_threshold=stability_threshold,
+            dampening_factor=dampening_factor,
+            use_ewma_smoothing=use_ewma_smoothing,
+            ewma_alpha=ewma_alpha
         )
         predictions_list.append(predictions)
     

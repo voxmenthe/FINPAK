@@ -26,9 +26,12 @@ all_configs = {
         },
         "train_params": {
             "epochs": 320,
-            "learning_rate": 1e-4,
-            "warmup_steps": 1000,
-            "decay_step_multiplier": None,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 1e-4,
+                "warmup_steps": 1000,
+                "decay_step_multiplier": None,
+            },
             "batch_size": 128,
             "patience": 32,
             "max_checkpoints": 5,
@@ -58,9 +61,12 @@ all_configs = {
         },
         "train_params": {
             "epochs": 640,
-            "learning_rate": 3e-5, # try 4 or 5e-5
-            "warmup_steps": 2000,
-            "decay_step_multiplier": 12,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 3e-5,
+                "warmup_steps": 2000,
+                "decay_step_multiplier": 12,
+            },
             "batch_size": 128,
             "patience": 88,
             "max_checkpoints": 5,
@@ -90,19 +96,21 @@ all_configs = {
         },
         "train_params": {
             "epochs": 1800,
-            "learning_rate": 5e-3, # previous 1e-3
-            "initial_learning_rate": 1e-6,
-            "weight_decay": 0.07, # previous 0.02
-            "warmup_steps": 80000,
-            "decay_step_multiplier": 0.7,
-            "enable_lr_adaptation": True,  # Enable adaptive learning rate
-            "lr_acceleration_factor": 1.2,  # Increase learning rate by 20% when improving
-            "lr_deceleration_factor": 0.8,  # Decrease learning rate by 20% when stagnating
-            "lr_adaptation_epochs": 5,  # Wait 5 epochs before adapting learning rate
-            "min_lr": 1e-6,  # Minimum learning rate
-            "max_lr": 1e-3,  # Maximum learning rate
+            "scheduler": {
+                "type": "cyclical",  
+                "base_lr": 5e-3,
+                "max_lr": 1e-2,     
+                "min_lr": 1e-6,     
+                "warmup_epochs": 10,  
+                "cycle_params": {
+                    "cycle_length": 50,     
+                    "decay_factor": 0.85,   
+                    "cycles": 10            
+                }
+            },
+            "weight_decay": 0.07,
             "batch_size": 128,
-            "patience": 32,
+            "patience": 88,
             "max_checkpoints": 5,
             "prefix": "mpvMS0003", # no relative positional encoding
         },
@@ -135,17 +143,14 @@ all_configs = {
             "patience": 32,
             "max_checkpoints": 5,
             "min_delta": 0.0,  # Minimum change in loss to be considered an improvement
-            "learning_rate": 5e-3,
-            "initial_learning_rate": 1e-7,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 5e-3,
+                "initial_lr": 1e-7,
+                "warmup_steps": 80000,
+                "decay_step_multiplier": 0.7,
+            },
             "weight_decay": 0.07,
-            "warmup_steps": 80000,
-            "decay_step_multiplier": 0.7,
-            "enable_lr_adaptation": True,
-            "lr_acceleration_factor": 2.0,
-            "lr_deceleration_factor": 0.8,
-            "lr_adaptation_epochs": 3,
-            "min_lr": 1e-7,
-            "max_lr": 1e-2,
             "prefix": "mpvMS0003a",
         }
     },
@@ -177,17 +182,14 @@ all_configs = {
             "patience": 32,
             "max_checkpoints": 5,
             "min_delta": 0.0,  # Minimum change in loss to be considered an improvement
-            "learning_rate": 4e-4,
-            "initial_learning_rate": 1e-8,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 4e-4,
+                "initial_lr": 1e-8,
+                "warmup_steps": 180000,
+                "decay_step_multiplier": 0.7,
+            },
             "weight_decay": 0.2,
-            "warmup_steps": 180000,
-            "decay_step_multiplier": 0.7,
-            "enable_lr_adaptation": True,
-            "lr_acceleration_factor": 1.1,
-            "lr_deceleration_factor": 0.8,
-            "lr_adaptation_epochs": 3,
-            "min_lr": 1e-8,
-            "max_lr": 1e-2,
             "prefix": "mpvMS0003b",
         }
     },
@@ -214,23 +216,19 @@ all_configs = {
         },
         "train_params": {
             "seed": 6657,
-            "epochs": 1800,
             "print_every": 10,
             "batch_size": 32,
             "patience": 32,
             "max_checkpoints": 5,
             "min_delta": 0.0,  # Minimum change in loss to be considered an improvement
-            "learning_rate": 4e-4,
-            "initial_learning_rate": 1e-9,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 4e-4,
+                "initial_lr": 1e-9,
+                "warmup_steps": 300_000,
+                "decay_step_multiplier": 0.7,
+            },
             "weight_decay": 0.3,
-            "warmup_steps": 300_000,
-            "decay_step_multiplier": 0.7,
-            "enable_lr_adaptation": True,
-            "lr_acceleration_factor": 0.85,
-            "lr_deceleration_factor": 0.8,
-            "lr_adaptation_epochs": 6,
-            "min_lr": 1e-9,
-            "max_lr": 1e-2,
             "prefix": "mpvMS0003c",
         }
     },
@@ -251,32 +249,130 @@ all_configs = {
             "return_periods": [1, 2, 3, 4, 6],
             "sma_periods": [20],
             "target_periods": [1, 2, 3, 4, 6],
-            "use_volatility": True,
-            "use_momentum": True,
+            "use_volatility": False,
+            "use_momentum": False,
             "momentum_periods": [6, 12]
         },
         "train_params": {
             "seed": 6657,
-            "epochs": 1800,
             "print_every": 10,
             "batch_size": 32,
             "patience": 32,
             "max_checkpoints": 5,
             "min_delta": 0.0,  # Minimum change in loss to be considered an improvement
-            "learning_rate": 6e-4,
-            "initial_learning_rate": 1e-9,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 6e-4,
+                "initial_lr": 1e-9,
+                "warmup_steps": 500_000,
+                "decay_step_multiplier": 0.7,
+            },
             "weight_decay": 0.45,
-            "warmup_steps": 500_000,
-            "decay_step_multiplier": 0.7,
-            "enable_lr_adaptation": True,
-            "lr_acceleration_factor": 0.75,
-            "lr_deceleration_factor": 0.8,
-            "lr_adaptation_epochs": 6,
-            "min_lr": 1e-9,
-            "max_lr": 1e-2,
             "prefix": "mpvMS0003d",
         }
     },
+
+
+    "vMS0004a": {
+        "model_params": {
+            "d_model": 256,
+            "n_heads": 8,
+            "n_layers": 16,
+            "d_ff": 512,
+            "dropout": 0.01,
+            "use_multi_scale": False,  # next try True with [1, 2, 4] or something similar
+            "use_relative_pos": False,
+            "temporal_scales": [1, 4, 6]  # try longer temporal scales
+        },
+        "data_params": {
+            "sequence_length": 34,  # try much longer and shorter sequence lengths
+            "return_periods": [1, 2, 3, 4, 10],
+            "sma_periods": [20],
+            "target_periods": [1, 2, 3, 4, 10],
+            "use_volatility": True,
+            "use_momentum": True,
+            "momentum_periods": [6, 12],
+            "reverse_tickers": True
+        },
+        "train_params": {
+            "seed": 6123,
+            "print_every": 10,
+            "batch_size": 64,
+            "patience": 8,
+            "max_checkpoints": 5,
+            "min_delta": 0.0,  # Minimum change in loss to be considered an improvement
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 6e-4,
+                "initial_lr": 1e-9,
+                "warmup_steps": 500_000,
+                "min_epochs_before_stopping": 30,
+                "decay_step_multiplier": 0.7,
+            },
+            "weight_decay": 0.15,
+            "validation_subset_size": 3,
+            "validation_overlap": 1,
+            "train_subset_size": 13,  # Number of training tickers to use in each subset
+            "train_overlap": 3,       # Number of training tickers to overlap between subsets
+            "prefix": "mpvMS0004a",
+            "architecture_version": "v3",
+            "run_id": "8"
+        }
+    },
+
+    "vMS0004b": {
+        "model_params": {
+            "d_model": 256,
+            "n_heads": 8,
+            "n_layers": 16,
+            "d_ff": 512,
+            "dropout": 0.01,
+            "use_multi_scale": False,  # next try True with [1, 2, 4] or something similar
+            "use_relative_pos": False,
+            "temporal_scales": [1, 4, 6]  # try longer temporal scales
+        },
+        "data_params": {
+            "sequence_length": 34,  # try much longer and shorter sequence lengths
+            "return_periods": [1, 2, 3, 4, 10],
+            "sma_periods": [20],
+            "target_periods": [1, 2, 3, 4, 10],
+            "use_volatility": True,
+            "use_momentum": True,
+            "momentum_periods": [6, 12],
+            "reverse_tickers": True
+        },
+        "train_params": {
+            "seed": 6123,
+            "epochs": 1000,
+            "print_every": 10,
+            "batch_size": 64,
+            "patience": 8,
+            "max_checkpoints": 5,
+            "min_delta": 0.0,  # Minimum change in loss to be considered an improvement
+            "scheduler": {
+                "type": "cyclical",
+                "base_lr": 1e-3,
+                "max_lr": 1e-2,
+                "min_lr": 1e-6,
+                "warmup_epochs": 10,
+                "cycle_params": {
+                    "cycle_length": 20,     # 20 epochs per cycle
+                    "decay_factor": 0.85,   # Decay peaks by 15% each cycle
+                    "cycles": 10            # Run for 10 cycles then maintain min_lr
+                }
+            },  
+            "weight_decay": 0.15,
+            "validation_subset_size": 3,
+            "validation_overlap": 1,
+            "train_subset_size": 13,  # Number of training tickers to use in each subset
+            "train_overlap": 3,       # Number of training tickers to overlap between subsets
+            "prefix": "mpvMS0004a",
+            "architecture_version": "v3",
+            "run_id": "0"
+        }
+    },
+
+
 
     "test_fourier": {
         "model_params": {
@@ -303,8 +399,11 @@ all_configs = {
         },
         "train_params": {
             "epochs": 20,
-            "learning_rate": 1e-3,
-            "warmup_steps": 1000,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 1e-3,
+                "warmup_steps": 1000,
+            },
             "batch_size": 128,
             "patience": 10,
             "max_checkpoints": 3,
@@ -338,8 +437,11 @@ all_configs = {
         },
         "train_params": {
             "epochs": 250,
-            "learning_rate": 3e-5,
-            "warmup_steps": 1000,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 3e-5,
+                "warmup_steps": 1000,
+            },
             "batch_size": 128,
             "patience": 8,
             "max_checkpoints": 3,
@@ -363,8 +465,11 @@ all_configs = {
         },
         "train_params": {
             "epochs": 320,
-            "learning_rate": 1e-3,
-            "warmup_steps": 3000,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 1e-3,
+                "warmup_steps": 3000,
+            },
             "batch_size": 128,
             "patience": 12,
             "max_checkpoints": 5,
@@ -388,8 +493,11 @@ all_configs = {
         },
         "train_params": {
             "epochs": 320,
-            "learning_rate": 1e-4,
-            "warmup_steps": 1000,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 1e-4,
+                "warmup_steps": 1000,
+            },
             "batch_size": 128,
             "patience": 32,
             "max_checkpoints": 5,
@@ -413,9 +521,12 @@ all_configs = {
         },
         "train_params": {
             "epochs": 320,
-            "learning_rate": 7e-5,
-            "warmup_steps": 1000,
-            "decay_step_multiplier": None,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 7e-5,
+                "warmup_steps": 1000,
+                "decay_step_multiplier": None,
+            },
             "batch_size": 128,
             "patience": 32,
             "max_checkpoints": 5,
@@ -439,12 +550,19 @@ all_configs = {
         },
         "train_params": {
             "epochs": 320,
-            "learning_rate": 2e-5,
-            "warmup_steps": 1000,
-            "decay_step_multiplier": None,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 2e-5,
+                "warmup_steps": 1000,
+                "decay_step_multiplier": None,
+            },
             "batch_size": 128,
             "patience": 32,
             "max_checkpoints": 5,
+            "validation_subset_size": 4,
+            "validation_overlap": 2,
+            "train_subset_size": 20,  # Number of training tickers to use in each subset
+            "train_overlap": 8,       # Number of training tickers to overlap between subsets
             "prefix": "mpv004",
         },
     },
@@ -465,9 +583,12 @@ all_configs = {
         },
         "train_params": {
             "epochs": 12000,
-            "learning_rate": 3e-5,
-            "warmup_steps": 2000,
-            "decay_step_multiplier": 10,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 3e-5,
+                "warmup_steps": 2000,
+                "decay_step_multiplier": 10,
+            },
             "batch_size": 128,
             "patience": 220,
             "max_checkpoints": 5,
@@ -491,9 +612,12 @@ all_configs = {
         },
         "train_params": {
             "epochs": 12000,
-            "learning_rate": 3e-3,
-            "warmup_steps": 5000,
-            "decay_step_multiplier": 5,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 3e-3,
+                "warmup_steps": 5000,
+                "decay_step_multiplier": 5,
+            },
             "batch_size": 128,
             "patience": 50,
             "max_checkpoints": 3,
@@ -517,9 +641,12 @@ all_configs = {
         },
         "train_params": {
             "epochs": 12000,
-            "learning_rate": 4e-4,
-            "warmup_steps": 4000,
-            "decay_step_multiplier": 8,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 4e-4,
+                "warmup_steps": 4000,
+                "decay_step_multiplier": 8,
+            },
             "batch_size": 128,
             "patience": 50,
             "max_checkpoints": 3,
@@ -543,9 +670,12 @@ all_configs = {
         },
         "train_params": {
             "epochs": 12000,
-            "learning_rate": 1e-4,
-            "warmup_steps": 4000,
-            "decay_step_multiplier": 8,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 1e-4,
+                "warmup_steps": 4000,
+                "decay_step_multiplier": 8,
+            },
             "batch_size": 128,
             "patience": 50,
             "max_checkpoints": 3,
@@ -569,9 +699,12 @@ all_configs = {
         },
         "train_params": {
             "epochs": 12000,
-            "learning_rate": 3e-4,
-            "warmup_steps": 4000,
-            "decay_step_multiplier": 15,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 3e-4,
+                "warmup_steps": 4000,
+                "decay_step_multiplier": 15,
+            },
             "batch_size": 128,
             "patience": 88,
             "max_checkpoints": 3,
@@ -620,95 +753,3 @@ all_configs = {
         },
     }
 }
-
-train_tickers_v1 = [
-    'AAPL', 'AAL', 'AMZN', 'AVGO', 'ADBE', 'AXP', 
-    'BA', 'BIIB', 'CLX', 'CMG', 'CRM', 'DIS', 'DE',
-    'EBAY', 'ED', 'FDX',
-    'GM', 'GD', 'GDX', 'GOOGL', 'GS', 'HD',
-    'IBM', 'INTC','ISRG', 
-    'JNJ', 'JPM', 
-    'KRE', 'KO',
-    'LEN', 'LLY','LMT', 'LULU', 'LVS',
-    'MA', 'META', 'MGM','MS', 'MSFT', 'NVDA',
-    'NOW', 'ORCL',
-    'PG', 
-    'OXY', 'PANW',
-    'LUV', 'PYPL', 
-    'SBUX', 'SCHW', 'SMH',
-    'TEVA', 'TGT','TOL', 'TSLA',
-    'UAL', 'UNH', 'UPS',
-    'WBA', 'WMT',
-]
-
-val_tickers_v1 = ['UAL', 'SNOW', 'CRWD', 'IBKR', 'AMD', 'COIN'] # 'FTNT', 'CRWD', 'CAVA', 'AMD', 'SNOW', 'UAL', 'DKNG',  # Validation tickers
-
-train_tickers_v2 = [
-    'AAPL', 'AAL', 'AMD', 'AMZN', 'AVGO', 'ADBE', 'AXP', 
-    'BA', 'BIIB', 'CLX', 'CMG', 'COIN', 'CRM', 'DIS', 'DE',
-    'EBAY', 'ED', 'F','FDX',
-    'GM', 'GD', 'GDX', 'GOOGL', 'GS', 'HD',
-    'IBM', 'INTC','ISRG', 
-    'JNJ', 'JPM', 
-    'KRE', 'KO',
-    'LEN', 'LLY','LMT', 'LULU', 'LVS',
-    'MA', 'META', 'MGM','MS', 'MSFT', 'MU','NVDA',
-    'NOW', 'ORCL',
-    'PG', 
-    'OXY', 'PANW',
-    'LUV', 'PYPL', 
-    'SBUX', 'SCHW', 'SMH',
-    'TEVA', 'TGT','TOL', 'TSLA',
-    'UAL', 'UNH', 'UPS',
-    'WBA', 'WMT', 'X', 'XOM'
-]
-
-val_tickers_v2 = ['UAL', 'SNOW', 'CRWD', 'IBKR', 'FTNT', 'CRWD', 'CAVA', 'DKNG']  # Validation tickers  
-
-
-train_tickers_v3 = [
-    'AAPL', 'AAL', 'AMD', 'AMZN', 'AVGO', 'ADBE', 'AXP', 
-    'BA', 'BIIB', 'CLX', 'CMG', 'COIN', 'CRM', 'DIS', 'DE',
-    'EBAY', 'ED', 'F','FDX',
-    'GM', 'GD', 'GDX', 'GOOGL', 'GS', 
-    'H', 'HD', 'HEES', 'HON',
-    'IBM', 'INTC','ISRG', 
-    'JNJ', 'JPM', 
-    'KRE', 'KO',
-    'LEN', 'LLY','LMT', 'LULU', 'LUV', 'LVS',
-    'MA', 'META', 'MGM','MS', 'MSFT', 'MSTR', 'MU',
-    'NVDA', 'NOW', 'ORCL', 'OXY', 'PANW', 'PG', 'PYPL', 
-    'SBUX', 'SCHW', 'SMH',
-    'TEVA', 'TGT','TOL', 'TSLA',
-    'UAL', 'UNH', 'UPS',
-    'WBA', 'WMT', 'X', 'XOM'
-]
-
-val_tickers_v3 = ['UAL', 'SNOW', 'PLTR', 'SHOP', 'CRWD', 'IBKR', 'FTNT', 'CRWD', 'CAVA', 'IBIT', 'DKNG']  # Validation tickers  
-
-
-train_tickers_v4 = [
-    'AAPL', 'AAL', 'AMD', 'AMZN', 'AVGO', 'ADBE', 'AXP', 
-    'BA', 'BIIB', 'CLX', 'CMG', 'COIN', 'CRM', 
-    'DAL','DIS', 'DE',
-    'EBAY', 'ED', 'F','FDX',
-    'GM', 'GD', 'GDX', 'GOOGL', 'GS', 
-    'H', 'HD', 'HEES', 'HON',
-    'IBM', 'INTC','ISRG', 
-    'JNJ', 'JPM', 
-    'KRE', 'KO',
-    'LEN', 'LLY','LMT', 'LULU', 'LUV', 'LVS',
-    'MA', 'MCD', 'META', 'MGM','MS', 'MSFT', 'MSTR', 'MU',
-    'NOW', 'NVDA', 'NVO', 
-    'ORCL', 'OXY', 'PANW', 
-    'PG', 'PYPL', 'QCOM',
-    'SBUX', 'SCHW', 'SMH',
-    'TEVA', 'TGT','TOL', 'TSLA',
-    'UBER','UAL', 'UNH', 'UPS', 'V'
-    'WBA', 'WMT', 'X', 'XHB','XOM'
-]
-
-val_tickers_v4 = [
-    'SNOW', 'PANW', 'PLTR', 'LYFT','SHOP', 
-    'CRWD', 'IBKR', 'FTNT', 'CRWD', 'CAVA', 
-    'IBIT', 'AMGN', 'DKNG'] # 'SNAP', 'SOFI'

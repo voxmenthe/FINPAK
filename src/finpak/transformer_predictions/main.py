@@ -8,35 +8,44 @@ import os
 import pandas as pd
 from finpak.data.fetchers.yahoo import download_multiple_tickers
 from finpak.transformer_predictions.preprocessing import combine_price_series, normalize_features
+from ticker_cycler import TickerCycler
+from data_loading import create_dataloaders, create_subset_dataloaders
 
-from configs import all_configs, train_tickers_v3, val_tickers_v3
+from configs import all_configs
+from ticker_configs import train_tickers_v4, val_tickers_v4
+
 
 def get_device():
-  if torch.backends.mps.is_available():
-      return torch.device("mps")
-  elif torch.cuda.is_available():
-      return torch.device("cuda")
-  else:
-      return torch.device("cpu")
-
-# Use this device throughout your code
-device = get_device()
-
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    elif torch.cuda.is_available():
+        return torch.device("cuda")
+    else:
+        return torch.device("cpu")
 
 
 if __name__ == "__main__":
+    # Use this device throughout your code
+    device = get_device()
+
     print(f"Using device: {device}")
 
-    CONFIG = all_configs['vMS0003d']
+    CONFIG = all_configs['vMS0004b']
+    print(CONFIG)
     # Set this to a checkpoint file path to resume training or None to start from scratch
-    checkpoint_path = None #'checkpoints/mpv005a_v2_e123_valloss_0.0020898.pt' # 'checkpoints/mpv005_v2_e81_valloss_0.0019177.pt' # None #'mpv1a_e99_valloss_0.0033764.pt' # 'mpv1a_e_77_valloss_0.0024084.pt' # 'mpv000_e245_valloss_0.0016670.pt' # None # 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  
+    checkpoint_path = None  # 'checkpoints/mpv005a_v2_e123_valloss_0.0020898.pt' # 'checkpoints/mpv005_v2_e81_valloss_0.0019177.pt' # None #'mpv1a_e99_valloss_0.0033764.pt' # 'mpv1a_e_77_valloss_0.0024084.pt' # 'mpv000_e245_valloss_0.0016670.pt' # None # 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  
 
-    architecture_version = '_v3'
+    checkpoint_dir = 'checkpoints'
 
-    train_tickers = train_tickers_v3
-    val_tickers = val_tickers_v3
-    train_df_fname = 'train_df_v3.csv'
-    val_df_fname = 'val_df_v3.csv'
+    train_tickers = train_tickers_v4
+    val_tickers = val_tickers_v4
+
+    if CONFIG['data_params'].get('reverse_tickers', False):
+        train_tickers = train_tickers[::-1]
+        val_tickers = val_tickers[::-1]
+
+    train_df_fname = 'train_df_v4.csv'
+    val_df_fname = 'val_df_v4.csv'
     FORCE_RELOAD = False
 
     # Extract only parameters needed for data loading and model initialization
@@ -45,83 +54,104 @@ if __name__ == "__main__":
     return_periods = CONFIG['data_params']['return_periods']
     sma_periods = CONFIG['data_params']['sma_periods']
     target_periods = CONFIG['data_params']['target_periods']
-    
+
+    # Validation cycling parameters
+    validation_subset_size = CONFIG['train_params']['validation_subset_size']  # Number of tickers in each validation subset
+    validation_overlap = CONFIG['train_params']['validation_overlap']  # Number of tickers to overlap between subsets
+
     DEBUG = True
     MODEL_PARAMS = CONFIG['model_params']
     
-    # Update prefix with architecture version
-    CONFIG['train_params']['prefix'] = CONFIG['train_params']['prefix'] + f'{architecture_version}'
-    
+    # Training cycling parameters
+    train_subset_size = CONFIG['train_params']['train_subset_size']
+    train_overlap = CONFIG['train_params']['train_overlap']
+
     start_date = '1990-01-01'
     end_date = '2024-11-05'
 
-    # Check if the dataframes already exist
-    if not os.path.exists(train_df_fname) or FORCE_RELOAD:
+    # Load or download data
+    if os.path.exists(train_df_fname) and os.path.exists(val_df_fname) and not FORCE_RELOAD:
+        print("Loading existing data files...")
+        train_df = pd.read_csv(train_df_fname, index_col=0)
+        val_df = pd.read_csv(val_df_fname, index_col=0)
+        
+        # Debug: Print available tickers
+        print("\nAvailable tickers in training data:", sorted(train_df.columns.tolist()))
+        missing_train = sorted(set(train_tickers) - set(train_df.columns))
+        print("\nMissing tickers in training data:", missing_train)
+        print("\nAvailable tickers in validation data:", sorted(val_df.columns.tolist()))
+        missing_val = sorted(set(val_tickers) - set(val_df.columns))
+        print("\nMissing tickers in validation data:", missing_val)
+
+        # Remove missing tickers from lists
+        if missing_train:
+            print(f"\nRemoving {len(missing_train)} missing tickers from training set")
+            train_tickers = [t for t in train_tickers if t not in missing_train]
+        
+        if missing_val:
+            print(f"\nRemoving {len(missing_val)} missing tickers from validation set")
+            val_tickers = [t for t in val_tickers if t not in missing_val]
+
+    else:
         # Download and process training data
         train_df = download_multiple_tickers(train_tickers, start_date, end_date)
         train_df = train_df.loc[:,'Adj Close']
         train_df.to_csv(train_df_fname)
-    else:
-        train_df = pd.read_csv(train_df_fname)
-    
-    if not os.path.exists(val_df_fname) or FORCE_RELOAD:
+        
         # Download and process validation data
         val_df = download_multiple_tickers(val_tickers, start_date, end_date)
         val_df = val_df.loc[:,'Adj Close']
         val_df.to_csv(val_df_fname)
-    else:
-        val_df = pd.read_csv(val_df_fname)
 
+    # Create cyclers with filtered ticker lists
+    validation_cycler = TickerCycler(
+        tickers=val_tickers,
+        subset_size=validation_subset_size,
+        overlap_size=validation_overlap,
+        reverse_tickers=CONFIG['data_params'].get('reverse_tickers', False)
+    )
 
-    # Process training price series
-    train_price_series = []
-    for ticker in train_tickers:
-        prices = train_df[ticker]
-        price_tensor = torch.tensor(prices.to_numpy(), dtype=torch.float32)
-        train_price_series.append(price_tensor)
-    
-    # Process validation price series
-    val_price_series = []
-    for ticker in val_tickers:
-        prices = val_df[ticker]
-        price_tensor = torch.tensor(prices.to_numpy(), dtype=torch.float32)
-        val_price_series.append(price_tensor)
+    train_cycler = TickerCycler(
+        tickers=train_tickers,
+        subset_size=train_subset_size,
+        overlap_size=train_overlap,
+        reverse_tickers=CONFIG['data_params'].get('reverse_tickers', False)
+    )
 
-    # Combine price series separately for train and validation
-    combined_train_prices = combine_price_series(train_price_series)
-    combined_val_prices = combine_price_series(val_price_series)
+    # Get initial subsets from cyclers
+    initial_train_tickers = train_cycler.get_current_subset()
+    initial_val_tickers = validation_cycler.get_current_subset()
 
-    # Create dataloaders with separate train/val prices
-    train_loader, val_loader, feature_names, target_names = create_dataloaders(
-        train_prices=combined_train_prices,
-        val_prices=combined_val_prices,
+    # Create initial dataloaders
+    train_loader, val_loader = create_subset_dataloaders(
+        train_df=train_df,
+        val_df=val_df,
+        train_tickers=initial_train_tickers,
+        val_tickers=initial_val_tickers,
+        config=CONFIG,
         batch_size=batch_size,
         sequence_length=sequence_length,
         return_periods=return_periods,
         sma_periods=sma_periods,
         target_periods=target_periods,
-        num_workers=16,
-        debug=DEBUG,
+        debug=DEBUG
     )
 
     if DEBUG:
         # Add logging
-        print("\nDataset Information:")
-        print(f"Training tickers: {train_tickers}")
-        print(f"Validation tickers: {val_tickers}")
-        print(f"\nTraining series length: {len(combined_train_prices)}")
-        print(f"Validation series length: {len(combined_val_prices)}")
-        print(f"\nNumber of features: {len(feature_names)}")
-        print(f"Features: {feature_names}")
-        print(f"Number of targets: {len(target_names)}")
-        print(f"Targets: {target_names}")
-        print(f"\nTraining batches: {len(train_loader)}")
+        print("\nFeature Information:")
+        print(f"Number of features: {len(train_loader.dataset.feature_names)}")
+        print(f"Features: {train_loader.dataset.feature_names}")
+        print(f"Number of targets: {len(train_loader.dataset.target_names)}")
+        print(f"Targets: {train_loader.dataset.target_names}")
+        print(f"\nBatch Information:")
+        print(f"Training batches: {len(train_loader)}")
         print(f"Validation batches: {len(val_loader)}")
 
     # Initialize model with correct input/output dimensions
     model = TimeSeriesDecoder(
-        d_input=len(feature_names),
-        n_outputs=len(target_names),
+        d_input=len(train_loader.dataset.feature_names),
+        n_outputs=len(train_loader.dataset.target_names),
         **MODEL_PARAMS,
     )
 
@@ -145,5 +175,16 @@ if __name__ == "__main__":
         val_loader=val_loader,
         device=device,
         start_epoch=start_epoch,
-        config=CONFIG
+        config=CONFIG,
+        checkpoint_dir=checkpoint_dir,
+        validation_cycler=validation_cycler,
+        train_cycler=train_cycler,
+        train_df=train_df,
+        val_df=val_df,
+        batch_size=batch_size,
+        sequence_length=sequence_length,
+        return_periods=return_periods,
+        sma_periods=sma_periods,
+        target_periods=target_periods,
+        debug=DEBUG
     )
