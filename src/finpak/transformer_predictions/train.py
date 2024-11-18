@@ -305,9 +305,36 @@ def train_model(
                 )[0]  # Only need train_loader
                 
                 should_continue = True
+                
+                # If validation cycler is exhausted but we have more training subsets,
+                # reset validation cycler to start from beginning
+                if enable_validation_cycling and not validation_cycler.has_more_subsets():
+                    print(f"\nResetting validation cycler to beginning as training continues")
+                    validation_cycler.reset()
+                    
+                    # Reset early stopping for new validation cycle
+                    early_stop = EarlyStopping(
+                        patience=train_params['patience'],
+                        min_delta=min_delta,
+                        max_checkpoints=train_params['max_checkpoints'],
+                        min_epochs=min_epochs_before_stopping
+                    )
+                    
+                    val_loader = create_subset_dataloaders(
+                        train_df=train_df,
+                        val_df=val_df,
+                        train_tickers=train_cycler.get_current_subset(),
+                        val_tickers=validation_cycler.get_current_subset(),
+                        config=config,
+                        batch_size=batch_size,
+                        sequence_length=sequence_length,
+                        return_periods=return_periods,
+                        sma_periods=sma_periods,
+                        target_periods=target_periods,
+                        debug=debug
+                    )[1]  # Only need val_loader
             
-            
-            if enable_validation_cycling and validation_cycler.has_more_subsets():
+            elif enable_validation_cycling and validation_cycler.has_more_subsets():
                 # Move to next validation subset
                 print(f"\nSwitching to next validation subset after epoch {epoch}")
                 validation_cycler.next_subset()

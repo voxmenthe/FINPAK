@@ -112,19 +112,69 @@ def create_subset_dataloaders(
     train_price_series = []
     for ticker in train_tickers:
         prices = train_df[ticker]
+        # Find first non-NaN value
+        first_valid_idx = prices.first_valid_index()
+        if first_valid_idx is None:
+            print(f"Warning: Ticker {ticker} has no valid prices")
+            continue
+            
+        # Only take data from first valid value onwards
+        prices = prices.loc[first_valid_idx:]
+        
+        # Convert to tensor
         price_tensor = torch.tensor(prices.to_numpy(), dtype=torch.float32)
+        
+        if debug:
+            print(f"\nTicker {ticker} price statistics:")
+            print(f"Start date: {prices.index[0]}")
+            print(f"End date: {prices.index[-1]}")
+            print(f"Length: {len(price_tensor)}")
+            print(f"First few prices: {price_tensor[:5].tolist()}")
+            print(f"Non-zero values: {(price_tensor != 0).sum().item()}")
+            print(f"Finite values: {torch.isfinite(price_tensor).sum().item()}")
+            
         train_price_series.append(price_tensor)
 
     # Process validation price series for subset
     val_price_series = []
     for ticker in val_tickers:
         prices = val_df[ticker]
+        # Find first non-NaN value
+        first_valid_idx = prices.first_valid_index()
+        if first_valid_idx is None:
+            print(f"Warning: Ticker {ticker} has no valid prices")
+            continue
+            
+        # Only take data from first valid value onwards
+        prices = prices.loc[first_valid_idx:]
+        
+        # Convert to tensor
         price_tensor = torch.tensor(prices.to_numpy(), dtype=torch.float32)
+        
+        if debug:
+            print(f"\nTicker {ticker} price statistics:")
+            print(f"Start date: {prices.index[0]}")
+            print(f"End date: {prices.index[-1]}")
+            print(f"Length: {len(price_tensor)}")
+            print(f"First few prices: {price_tensor[:5].tolist()}")
+            print(f"Non-zero values: {(price_tensor != 0).sum().item()}")
+            print(f"Finite values: {torch.isfinite(price_tensor).sum().item()}")
+            
         val_price_series.append(price_tensor)
 
+    if not train_price_series or not val_price_series:
+        raise ValueError("No valid price series found for training or validation")
+
     # Combine price series separately for train and validation
-    combined_train_prices = combine_price_series(train_price_series)
-    combined_val_prices = combine_price_series(val_price_series)
+    combined_train_prices = combine_price_series(train_price_series, debug=debug)
+    combined_val_prices = combine_price_series(val_price_series, debug=debug)
+
+    if debug:
+        print(f"\nSubset Information:")
+        print(f"Training tickers: {train_tickers}")
+        print(f"Validation tickers: {val_tickers}")
+        print(f"Training series length: {len(combined_train_prices)}")
+        print(f"Validation series length: {len(combined_val_prices)}")
 
     # Create dataloaders with separate train/val prices
     train_loader, val_loader, feature_names, target_names = create_dataloaders(

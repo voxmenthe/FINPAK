@@ -366,7 +366,7 @@ all_configs = {
             "validation_overlap": 1,
             "train_subset_size": 13,  # Number of training tickers to use in each subset
             "train_overlap": 3,       # Number of training tickers to overlap between subsets
-            "prefix": "mpvMS0004a",
+            "prefix": "mpvMS0004b",
             "architecture_version": "v3",
             "run_id": "0"
         }
@@ -751,5 +751,164 @@ all_configs = {
             "d_ff": 8192,
             "dropout": 0.12,
         },
-    }
+    },
+
+    "vMP001a": {
+        "model_params": {
+            "d_model": 256,
+            "n_heads": 8,
+            "n_layers": 16,
+            "d_ff": 512,
+            "dropout": 0.02,
+            "use_multi_scale": False,  # next try True with [1, 2, 4] or something similar
+            "use_relative_pos": False,
+            "temporal_scales": [1, 4, 6]  # try longer temporal scales
+        },
+        "data_params": {
+            "sequence_length": 50,  # try much longer and shorter sequence lengths
+            "return_periods": [1, 4, 8, 16, 32],
+            "sma_periods": [5, 20, 50],
+            "target_periods": [1, 4, 8, 16, 32],
+            "use_volatility": True,
+            "use_momentum": True,
+            "momentum_periods": [6, 12, 24],
+            "reverse_tickers": True
+        },
+        "train_params": {
+            "seed": 6123,
+            "epochs": 1000,
+            "print_every": 10,
+            "batch_size": 64,
+            "patience": 8,
+            "max_checkpoints": 5,
+            "min_delta": 0.0,  # Minimum change in loss to be considered an improvement
+            "scheduler": {
+                "type": "cyclical",
+                "base_lr": 1e-3,
+                "max_lr": 1e-2,
+                "min_lr": 1e-6,
+                "warmup_epochs": 10,
+                "cycle_params": {
+                    "cycle_length": 20,     # 20 epochs per cycle
+                    "decay_factor": 0.95,   # Decay peaks by 15% each cycle
+                    "cycles": 20            # Run for 10 cycles then maintain min_lr
+                }
+            },  
+            "weight_decay": 0.13,
+            "validation_subset_size": 3,
+            "validation_overlap": 1,
+            "train_subset_size": 15,  # Number of training tickers to use in each subset
+            "train_overlap": 3,       # Number of training tickers to overlap between subsets
+            "prefix": "vMP001a",
+            "architecture_version": "v3",
+            "run_id": "0"
+        }
+    },
+
+    "vMP002a": {
+        "model_params": {
+            "d_model": 320,  # try much longer and shorter sequence lengths,
+            "n_heads": 8,
+            "n_layers": 24,
+            "d_ff": 640,
+            "dropout": 0.03,
+            "use_multi_scale": False,  # next try True with [1, 2, 4] or something similar
+            "use_relative_pos": False,
+            "temporal_scales": [1, 4, 6]  # try longer temporal scales
+        },
+        "data_params": {
+            "sequence_length": 50,  # try much longer and shorter sequence lengths
+            "return_periods": [1, 4, 8, 13, 26, 36],
+            "sma_periods": [5, 17, 36, 50],
+            "target_periods": [1, 4, 8, 13, 26, 36],
+            "use_volatility": True,
+            "use_momentum": True,
+            "momentum_periods": [6, 12, 16, 28, 34],
+            "reverse_tickers": False
+        },
+        "train_params": {
+            "seed": 6123,
+            "epochs": 1000,
+            "print_every": 10,
+            "batch_size": 64,
+            "patience": 12, # 8
+            "max_checkpoints": 5,
+            "min_delta": 0.0,  # Minimum change in loss to be considered an improvement
+            "scheduler": {
+                "type": "cyclical",
+                "base_lr": 1e-3,
+                "max_lr": 1e-2,
+                "min_lr": 1e-6,
+                "warmup_epochs": 15, # 10
+                "cycle_params": {
+                    "cycle_length": 30,     # 20,     # 20 epochs per cycle
+                    "decay_factor": 0.85,   #0.9,   # Decay peaks by 15% each cycle
+                    "cycles": 60            # Run for 10 cycles then maintain min_lr
+                }
+            },  
+            "weight_decay": 0.13,
+            "validation_subset_size": 4,
+            "validation_overlap": 2,
+            "train_subset_size": 12, # 16,  # Number of training tickers to use in each subset
+            "train_overlap": 6, # 5,       # Number of training tickers to overlap between subsets
+            "prefix": "vMP002a",
+            "architecture_version": "v3",
+            "run_id": "1"
+        }
+    },
+
+
+    "vMP003a": {
+        "model_params": {
+            "d_model": 320,  # try much longer and shorter sequence lengths,
+            "n_heads": 16,
+            "n_layers": 24,
+            "d_ff": 640,
+            "dropout": 0.35,
+            "use_multi_scale": False,  # next try True with [1, 2, 4] or something similar
+            "use_relative_pos": False,
+            "temporal_scales": [1, 4, 6]  # try longer temporal scales
+        },
+        "data_params": {
+            "sequence_length": 50,  # try much longer and shorter sequence lengths
+            "return_periods": [1, 4, 8, 13, 26, 36],
+            "sma_periods": [5, 17, 36, 50],
+            "target_periods": [1, 4, 8, 13, 26, 36],
+            "use_volatility": True,
+            "use_momentum": True,
+            "momentum_periods": [6, 12, 16, 28, 34],
+            "reverse_tickers": False
+        },
+        "train_params": {
+            "seed": 6123,
+            "epochs": 1000,
+            "print_every": 10,
+            "batch_size": 64,
+            "patience": 16, # 8
+            "max_checkpoints": 7,
+            "min_delta": 0.0,  # Minimum change in loss to be considered an improvement
+            "scheduler": {
+                "type": "cyclical",
+                "base_lr": 1e-3,
+                "max_lr": 1e-2,
+                "min_lr": 1e-6,
+                "warmup_epochs": 20,
+                "cycle_params": {
+                    "cycle_length": 40,     # 20,     # 20 epochs per cycle
+                    "decay_factor": 0.85,   #0.9,   # Decay peaks by 15% each cycle
+                    "cycles": 60            # Run for 10 cycles then maintain min_lr
+                }
+            },  
+            "weight_decay": 0.13,
+            "validation_subset_size": 4,
+            "validation_overlap": 2,
+            "train_subset_size": 12, # 16,  # Number of training tickers to use in each subset
+            "train_overlap": 6, # 5,       # Number of training tickers to overlap between subsets
+            "prefix": "vMP003a",
+            "architecture_version": "v3",
+            "run_id": "0"
+        }
+    },
+
+
 }

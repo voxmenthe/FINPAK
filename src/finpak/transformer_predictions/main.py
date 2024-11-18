@@ -12,7 +12,7 @@ from ticker_cycler import TickerCycler
 from data_loading import create_dataloaders, create_subset_dataloaders
 
 from configs import all_configs
-from ticker_configs import train_tickers_v4, val_tickers_v4
+from ticker_configs import train_tickers_v7, val_tickers_v7
 
 
 def get_device():
@@ -30,22 +30,22 @@ if __name__ == "__main__":
 
     print(f"Using device: {device}")
 
-    CONFIG = all_configs['vMS0004b']
+    CONFIG = all_configs["vMP003a"]
     print(CONFIG)
     # Set this to a checkpoint file path to resume training or None to start from scratch
     checkpoint_path = None  # 'checkpoints/mpv005a_v2_e123_valloss_0.0020898.pt' # 'checkpoints/mpv005_v2_e81_valloss_0.0019177.pt' # None #'mpv1a_e99_valloss_0.0033764.pt' # 'mpv1a_e_77_valloss_0.0024084.pt' # 'mpv000_e245_valloss_0.0016670.pt' # None # 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  
 
     checkpoint_dir = 'checkpoints'
 
-    train_tickers = train_tickers_v4
-    val_tickers = val_tickers_v4
+    train_tickers = train_tickers_v7
+    val_tickers = val_tickers_v7
 
     if CONFIG['data_params'].get('reverse_tickers', False):
         train_tickers = train_tickers[::-1]
         val_tickers = val_tickers[::-1]
 
-    train_df_fname = 'train_df_v4.csv'
-    val_df_fname = 'val_df_v4.csv'
+    train_df_fname = 'train_df_v7.csv'
+    val_df_fname = 'val_df_v7.csv'
     FORCE_RELOAD = False
 
     # Extract only parameters needed for data loading and model initialization
@@ -67,13 +67,36 @@ if __name__ == "__main__":
     train_overlap = CONFIG['train_params']['train_overlap']
 
     start_date = '1990-01-01'
-    end_date = '2024-11-05'
+    end_date = '2024-11-15'
 
     # Load or download data
     if os.path.exists(train_df_fname) and os.path.exists(val_df_fname) and not FORCE_RELOAD:
         print("Loading existing data files...")
         train_df = pd.read_csv(train_df_fname, index_col=0)
         val_df = pd.read_csv(val_df_fname, index_col=0)
+        
+        # Convert index to datetime
+        train_df.index = pd.to_datetime(train_df.index)
+        val_df.index = pd.to_datetime(val_df.index)
+        
+        # Forward fill any missing values within each ticker's series
+        train_df = train_df.fillna(method='ffill')
+        val_df = val_df.fillna(method='ffill')
+        
+        # Drop any remaining NaN values
+        train_df = train_df.dropna(axis=0, how='any')
+        val_df = val_df.dropna(axis=0, how='any')
+        
+        if DEBUG:
+            print("\nData loading statistics:")
+            print("Training data:")
+            print(f"Shape: {train_df.shape}")
+            print(f"Date range: {train_df.index[0]} to {train_df.index[-1]}")
+            print(f"NaN counts:\n{train_df.isna().sum()}")
+            print("\nValidation data:")
+            print(f"Shape: {val_df.shape}")
+            print(f"Date range: {val_df.index[0]} to {val_df.index[-1]}")
+            print(f"NaN counts:\n{val_df.isna().sum()}")
         
         # Debug: Print available tickers
         print("\nAvailable tickers in training data:", sorted(train_df.columns.tolist()))
@@ -108,14 +131,16 @@ if __name__ == "__main__":
         tickers=val_tickers,
         subset_size=validation_subset_size,
         overlap_size=validation_overlap,
-        reverse_tickers=CONFIG['data_params'].get('reverse_tickers', False)
+        reverse_tickers=CONFIG['data_params'].get('reverse_tickers', False),
+        use_anchor=CONFIG['data_params'].get('use_anchor', False)
     )
 
     train_cycler = TickerCycler(
         tickers=train_tickers,
         subset_size=train_subset_size,
         overlap_size=train_overlap,
-        reverse_tickers=CONFIG['data_params'].get('reverse_tickers', False)
+        reverse_tickers=CONFIG['data_params'].get('reverse_tickers', False),
+        use_anchor=CONFIG['data_params'].get('use_anchor', False)
     )
 
     # Get initial subsets from cyclers

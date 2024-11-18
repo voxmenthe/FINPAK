@@ -88,3 +88,94 @@ val_tickers_v4 = [
     'AMGN', 'PANW', 'PLTR', 'LYFT', 'SHOP', 
     'CRWD', 'IBKR', 'FTNT', 'CRWD', 'CAVA', 
     'IBIT', 'DKNG', 'SNAP', 'SOFI', 'SNOW']
+
+
+train_tickers_v5 = [
+    'AAPL', 'AAL', 'ACN', 'AMD', 'AMZN', 'AVAV','AVGO', 'ADBE', 'ARKK', 'AXP',
+    'BA', 'BAC','BIIB', 'C', 'CLX', 'CMG', 'COIN', 'COST', 'CRM',
+    'DAL', 'DG', 'DIS', 'DE', 'DLTR', 
+    'EBAY', 'ED', 'F','FDX',
+    'GILD', 'GM', 'GD', 'GDX', 'GOOGL', 'GS',
+    'H', 'HD', 'HEES', 'HON',
+    'IBM', 'INTC', 'ISRG',
+    'JNJ', 'JPM',
+    'KRE', 'KO',
+    'LEN', 'LLY', 'LMT', 'LULU', 'LUV', 'LVS',
+    'MA', 'MCD', 'META', 'MGM', 'MS', 'MSFT', 'MSTR',
+    'MRO', 'MRVL', 'MU',
+    'NOW', 'NVDA', 'NVO',
+    'ORCL', 'OXY', 'PANW',
+    'PG', 'PYPL', 'QCOM',
+    'ROST',
+    'SBUX', 'SCHW', 'SMH',
+    'TEVA', 'TGT', 'TMO', 'TOL', 'TSLA',
+    'UBER', 'UAL', 'UNH', 'UPS', 'V',
+    'WBA', 'WFC', 'WMT', 'X', 'XHB', 'XOM'
+]
+
+val_tickers_v5 = [
+    'AMGN', 'APP', 'PANW', 'PLTR', 'LYFT', 'SHOP',
+    'CRWD', 'IBKR', 'FTNT', 'NET', 'NIO', 'NU',
+    'CRWD', 'CAVA', 
+    'IBIT', 'DKNG', 'SNAP', 'SOFI', 'SNOW']
+
+
+train_tickers_v6 = [
+    'AAPL', 'AAL', 'ACN', 'AMD', 'AMZN', 'AVAV','AVGO', 'ADBE', 'ARKK', 'AXP',
+    'BA', 'BAC','BIIB', 'C', 'CL', 'CLX', 'CMG', 'COIN', 'COST', 'CRM',
+    'DAL', 'DG', 'DIS', 'DE', 'DLTR', 
+    'EBAY', 'ED', 'EEM', 'F', 'FDX',
+    'GILD', 'GIS', 'GM', 'GD', 'GDX', 'GOOGL', 'GS',
+    'H', 'HD', 'HEES', 'HON',
+    'IBM', 'INTC', 'ISRG', 'IWM',
+    'JNJ', 'JPM',
+    'KRE', 'KO',
+    'LEN', 'LLY', 'LMT', 'LULU', 'LUV', 'LVS',
+    'MA', 'MCD', 'META', 'MGM', 'MS', 'MSFT', 'MSTR',
+    'MRO', 'MRVL', 'MU',
+    'NOW', 'NVDA', 'NVO',
+    'ORCL', 'OXY', 'PANW',
+    'PG', 'PYPL', 'QCOM',
+    'ROST',
+    'SBUX', 'SCHW', 'SLB','SMH',
+    'TEVA', 'TGT', 'TMO', 'TOL', 'TSLA',
+    'UBER', 'UAL', 'UNH', 'UPS', 'V',
+    'WBA', 'WFC', 'WMT', 'X', 'XHB', 'XOM'
+]
+
+val_tickers_v6 = [
+    'AMGN', 'APP', 'PANW', 'PLTR', 'LYFT', 'SHOP',
+    'CRWD', 'CAVA', 'MRNA', 'S', 'TEAM',
+    'IBKR', 'FTNT', 'NET', 'NIO', 'NU',
+    'IBIT', 'DKNG', 'SNAP', 'SOFI', 'SNOW']
+
+train_tickers_v7 = [
+    'AAPL', 'AAL', 'ACN', 'AMD', 'AMZN', 'ANF', 
+    'APTV', 'AVAV','AVGO', 'ADBE', 'ARKK', 'AXP',
+    'BA', 'BAC','BIIB', 'BLK',
+    'C', 'CL', 'CLX', 'CMG', 'COIN', 'COST', 'CRM',
+    'DAL', 'DG', 'DIS', 'DE', 'DLTR', 
+    'EBAY', 'ED', 'EEM', 'F', 'FDX',
+    'GILD', 'GIS', 'GM', 'GD', 'GDX', 'GOOGL', 'GS',
+    'H', 'HD', 'HEES', 'HON',
+    'IBM', 'INTC', 'ISRG', 'IWM',
+    'JNJ', 'JPM',
+    'KRE', 'KO',
+    'LEN', 'LLY', 'LMT', 'LULU', 'LUV', 'LVS',
+    'MA', 'MCD', 'META', 'MGM', 'MS', 'MSFT', 'MSTR',
+    'MRO', 'MRVL', 'MU',
+    'NOW', 'NVDA', 'NVO',
+    'ORCL', 'OXY', 'PANW',
+    'PG', 'PYPL', 'QCOM',
+    'ROST',
+    'SBUX', 'SCHW', 'SLB','SMH',
+    'TEVA', 'TGT', 'TMO', 'TOL', 'TSLA',
+    'UBER', 'UAL', 'UNH', 'UPS', 'V',
+    'WBA', 'WFC', 'WMT', 'X', 'XHB', 'XOM'
+]
+
+val_tickers_v7 = [
+    'AMGN', 'APP', 'PANW', 'PLTR', 'LYFT', 'SHOP',
+    'CRWD', 'CAVA', 'MRNA', 'S', 'TEAM',
+    'IBKR', 'FTNT', 'NET', 'NIO', 'NU',
+    'IBIT', 'DKNG', 'SNAP', 'SOFI', 'SNOW']
