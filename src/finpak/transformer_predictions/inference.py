@@ -55,7 +55,9 @@ def make_autoregressive_prediction(
     stability_threshold: float = 0.1,  # Max allowed daily return magnitude
     dampening_factor: float = 0.95,    # Exponential dampening per step
     use_ewma_smoothing: bool = True,   # Use exponential moving average
-    ewma_alpha: float = 0.7           # EWMA smoothing factor
+    ewma_alpha: float = 0.7,          # EWMA smoothing factor
+    temperature: float = 0.01,        # Temperature for return sampling (default 0.01 = 1% std)
+    use_sampling: bool = False        # Whether to use stochastic sampling
 ) -> torch.Tensor:
     """
     Make autoregressive predictions starting from an initial sequence.
@@ -115,6 +117,27 @@ def make_autoregressive_prediction(
             
             # Make prediction
             pred = model(input_sequence)
+            
+            # Apply temperature-based sampling if enabled
+            if use_sampling:
+                # Create a Gaussian distribution centered on predicted returns
+                # Temperature is interpreted as the standard deviation in return space
+                # e.g., temperature=0.01 means returns vary by ±1% (one std)
+                dist = torch.distributions.Normal(pred, temperature)
+                
+                # Sample from the distribution
+                pred = dist.sample()
+                
+                # Ensure sampled returns are within reasonable bounds
+                # Clip to ±3 standard deviations
+                pred = torch.clamp(pred, pred - 3*temperature, pred + 3*temperature)
+                
+                if debug:
+                    print(f"\nStep {step} stochastic sampling:")
+                    print(f"Original returns: {pred[0].cpu().numpy()}")
+                    print(f"Temperature (return std): {temperature:.3f}")
+                    print(f"Sampled returns: {pred[0].cpu().numpy()}")
+            
             raw_pred = pred[0].cpu().numpy()
             predictions.append(pred[0])
             
@@ -304,7 +327,9 @@ def predict_from_checkpoint(
     stability_threshold: float = 0.1,  # Max allowed daily return magnitude
     dampening_factor: float = 0.95,    # Exponential dampening per step
     use_ewma_smoothing: bool = True,   # Use exponential moving average
-    ewma_alpha: float = 0.7           # EWMA smoothing factor
+    ewma_alpha: float = 0.7,          # EWMA smoothing factor
+    temperature: float = 0.01,        # Temperature for return sampling (default 0.01 = 1% std)
+    use_sampling: bool = False        # Whether to use stochastic sampling
 ) -> None:
     """
     Load a model from checkpoint and make/plot predictions from multiple start points.
@@ -377,7 +402,9 @@ def predict_from_checkpoint(
             stability_threshold=stability_threshold,
             dampening_factor=dampening_factor,
             use_ewma_smoothing=use_ewma_smoothing,
-            ewma_alpha=ewma_alpha
+            ewma_alpha=ewma_alpha,
+            temperature=temperature,
+            use_sampling=use_sampling
         )
         predictions_list.append(predictions)
     
