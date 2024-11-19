@@ -12,6 +12,8 @@ from ticker_cycler import TickerCycler
 import random
 from data_loading import create_subset_dataloaders
 import pandas as pd
+import signal
+import sys
 
 
 def seed_everything(seed: int) -> None:
@@ -199,12 +201,38 @@ def train_model(
     # Adjust total epochs to account for start_epoch
     remaining_epochs = n_epochs - start_epoch
     
+    # Set up interrupt handling
+    interrupted = False
+    def signal_handler(signum, frame):
+        nonlocal interrupted
+        print("\nInterrupt received. Will save checkpoint and exit after current batch...")
+        interrupted = True
+    
+    # Register the signal handler
+    signal.signal(signal.SIGINT, signal_handler)
+    
     for epoch in range(start_epoch, n_epochs):
         # Training
         model.train()
         epoch_loss = 0.0
         
         for batch_x, batch_y in train_loader:
+            if interrupted:
+                print("Saving final checkpoint before exit...")
+                checkpoint = {
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'val_loss': val_losses[-1] if val_losses else float('inf'),
+                    'train_loss': train_losses[-1] if train_losses else float('inf'),
+                    'train_cycle': train_cycler.current_subset_idx if train_cycler else 0,
+                    'val_cycle': validation_cycler.current_subset_idx if validation_cycler else 0
+                }
+                final_checkpoint_name = f"{config['train_params']['prefix']}_id_{config['train_params']['run_id']}_INTERRUPTED_e{epoch}.pt"
+                torch.save(checkpoint, os.path.join(checkpoint_dir, final_checkpoint_name))
+                print(f"Saved interrupt checkpoint: {final_checkpoint_name}")
+                sys.exit(0)
+            
             batch_x = batch_x.to(device)
             batch_y = batch_y.to(device)
             
@@ -243,34 +271,68 @@ def train_model(
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'val_loss': current_val_loss,
-            'train_loss': train_losses[-1]
+            'train_loss': train_losses[-1],
+            'train_cycle': train_cycler.current_subset_idx if train_cycler else 0,
+            'val_cycle': validation_cycler.current_subset_idx if validation_cycler else 0
         }
         
+        # Generate checkpoint name with cycle information
+        cycle_info = f"_tc{train_cycler.current_subset_idx if train_cycler else 0}_vc{validation_cycler.current_subset_idx if validation_cycler else 0}"
+        checkpoint_name = f"{config['train_params']['prefix']}_id_{config['train_params']['run_id']}_arc_{config['train_params']['architecture_version']}{cycle_info}_e{epoch}_valloss_{current_val_loss:.7f}.pt"
+        
+        # Always save the first checkpoint of each cycle
+        current_cycle = (train_cycler.current_subset_idx if train_cycler else 0, validation_cycler.current_subset_idx if validation_cycler else 0)
+        is_first_checkpoint_in_cycle = not any(cycle == current_cycle for _, _, cycle in best_models)
+        
         # Handle model checkpointing
-        if len(best_models) < train_params['max_checkpoints']:
-            heappush(best_models, (-current_val_loss, epoch))
-            checkpoint_name = f"{config['train_params']['prefix']}_id_{config['train_params']['run_id']}_arc_{config['train_params']['architecture_version']}_e{epoch}_valloss_{current_val_loss:.7f}.pt"
+        if len(best_models) < train_params['max_checkpoints'] or is_first_checkpoint_in_cycle:
+            heappush(best_models, (-current_val_loss, epoch, current_cycle))
             torch.save(checkpoint, os.path.join(checkpoint_dir, checkpoint_name))
+            print(f"Saved chkpt cycle# {current_cycle}  {checkpoint_name}")
         else:
             # If current model is better than worst of our best models
             if -current_val_loss > best_models[0][0]:
-                # Remove the worst checkpoint file
-                worst_loss, worst_epoch = heappushpop(best_models, (-current_val_loss, epoch))
-                # Find and remove the old checkpoint file that matches the epoch
+                # Check if we can remove a checkpoint from the same cycle
+                same_cycle_checkpoints = [(i, (loss, ep, cyc)) for i, (loss, ep, cyc) in enumerate(best_models) if cyc == current_cycle]
+                
+                if same_cycle_checkpoints:
+                    # Remove the worst checkpoint from the same cycle
+                    worst_idx, (worst_loss, worst_epoch, worst_cycle) = min(same_cycle_checkpoints, key=lambda x: x[1][0])
+                    best_models.pop(worst_idx)
+                else:
+                    # Remove the overall worst checkpoint that's not the only one from its cycle
+                    cycle_counts = {}
+                    for _, _, cyc in best_models:
+                        cycle_counts[cyc] = cycle_counts.get(cyc, 0) + 1
+                    
+                    # Find the worst checkpoint that's not the only one from its cycle
+                    for i, (loss, ep, cyc) in enumerate(best_models):
+                        if cycle_counts[cyc] > 1:
+                            worst_idx = i
+                            worst_loss, worst_epoch, worst_cycle = loss, ep, cyc
+                            break
+                    else:
+                        # If we can't find a checkpoint to remove, don't save the new one
+                        return
+                    
+                    best_models.pop(worst_idx)
+                
+                # Find and remove the old checkpoint file
+                old_cycle_info = f"_tc{worst_cycle[0]}_vc{worst_cycle[1]}"
                 for filename in os.listdir(checkpoint_dir):
-                    # Skip macOS hidden files and system files
-                    if filename.startswith('.'):
+                    if filename.startswith('.'):  # Skip hidden files
                         continue
-                    if f"{config['train_params']['prefix']}_id_{config['train_params']['run_id']}_arc_{config['train_params']['architecture_version']}_e{worst_epoch}_" in filename:
+                    if (f"{config['train_params']['prefix']}_id_{config['train_params']['run_id']}_arc_"
+                        f"{config['train_params']['architecture_version']}{old_cycle_info}_e{worst_epoch}_" in filename):
                         try:
                             os.remove(os.path.join(checkpoint_dir, filename))
                         except FileNotFoundError:
                             print(f"Warning: Could not delete checkpoint file {filename}")
                 
                 # Save the new checkpoint
-                checkpoint_name = f"{config['train_params']['prefix']}_id_{config['train_params']['run_id']}_arc_{config['train_params']['architecture_version']}_e{epoch}_valloss_{current_val_loss:.7f}.pt"
+                heappush(best_models, (-current_val_loss, epoch, current_cycle))
                 torch.save(checkpoint, os.path.join(checkpoint_dir, checkpoint_name))
-                print(f"Saved new checkpoint with filename {checkpoint_name}")
+                print(f"Saved chkpt cycle# {current_cycle}  {checkpoint_name}")
         
         # Check early stopping
         if early_stop(current_val_loss):
@@ -374,7 +436,7 @@ def train_model(
                 # Save final checkpoint
                 final_checkpoint_name = f"{config['train_params']['prefix']}_final_id_{config['train_params']['run_id']}_arc_{config['train_params']['architecture_version']}_e{epoch}_valloss_{current_val_loss:.7f}.pt"
                 torch.save(checkpoint, os.path.join(checkpoint_dir, final_checkpoint_name))
-                print(f"Saved final checkpoint with filename {final_checkpoint_name}")
+                print(f"Saved final chkpt: {final_checkpoint_name}")
                 break
         
         if (epoch + 1) % train_params['print_every'] == 0:
@@ -386,7 +448,7 @@ def train_model(
             
     # At the end of training, print information about best checkpoints
     print("\nBest checkpoints:")
-    for neg_loss, epoch in sorted(best_models, reverse=True):
+    for neg_loss, epoch, cycle in sorted(best_models, reverse=True):
         print(f"Epoch {epoch}: validation loss = {-neg_loss:.7f}")
             
     return train_losses, val_losses

@@ -59,7 +59,7 @@ if __name__ == "__main__":
     validation_subset_size = CONFIG['train_params']['validation_subset_size']  # Number of tickers in each validation subset
     validation_overlap = CONFIG['train_params']['validation_overlap']  # Number of tickers to overlap between subsets
 
-    DEBUG = True
+    DEBUG = False  # True
     MODEL_PARAMS = CONFIG['model_params']
     
     # Training cycling parameters
