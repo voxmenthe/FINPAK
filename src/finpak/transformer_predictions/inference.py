@@ -107,9 +107,15 @@ def make_autoregressive_prediction(
             # Normalize features
             features = normalize_features(features)
             
-            # Ensure we have enough data points
+            # Check if we have enough valid features after warmup
+            if len(features) < 1:
+                raise ValueError(f"No valid features after warmup period. Initial sequence length: {len(current_sequence)}")
+            
+            # Ensure we have enough data points for the sequence
             if len(features) < sequence_length:
                 pad_length = sequence_length - len(features)
+                if debug:
+                    print(f"Padding {pad_length} timesteps with zeros")
                 features = torch.cat([torch.zeros(pad_length, features.shape[1]), features])
             
             # Get last sequence_length points
@@ -344,24 +350,61 @@ def predict_from_checkpoint(
     if use_multi_horizon and horizon_weights is None:
         horizon_weights = [1.0 / len(return_periods)] * len(return_periods)
     
-    # Validate start indices
+    if debug:
+        print(f"\nValidating start indices:")
+        print(f"Price series length: {len(price_series)}")
+        print(f"Number of start indices: {len(start_indices)}")
+        print(f"Min start index: {min(start_indices)}")
+        print(f"Max start index: {max(start_indices)}")
+        print(f"Indices exceeding length: {[idx for idx in start_indices if idx >= len(price_series)]}")
+    
+    # Calculate required warmup period first
+    max_lookback = max([
+        max(sma_periods) if sma_periods else 0,
+        max(return_periods),  # For return features
+        max(return_periods)   # For target calculation
+    ])
+    
+    total_required_history = sequence_length + max_lookback
+    if debug:
+        print(f"\nRequired history:")
+        print(f"Sequence length: {sequence_length}")
+        print(f"Max lookback: {max_lookback}")
+        print(f"Total required history: {total_required_history}")
+    
+    # Clip indices to valid range and ensure enough history
     valid_indices = []
+    skipped_early = 0  # Count indices skipped due to insufficient history
+    skipped_invalid = 0  # Count indices skipped due to invalid prices
+    
     for idx in start_indices:
-        if idx >= len(price_series):
-            print(f"Warning: Start index {idx} is beyond price series length {len(price_series)}")
+        # Clip to valid range
+        idx = min(idx, len(price_series) - 1)
+        
+        # Check if we have enough history
+        if idx < total_required_history:
+            skipped_early += 1
             continue
+            
+        # Check for valid price
         if not torch.isfinite(price_series[idx]):
-            print(f"Warning: Invalid price at index {idx}")
+            skipped_invalid += 1
             continue
+            
         valid_indices.append(idx)
     
     if not valid_indices:
         raise ValueError("No valid start indices provided")
     
-    # print(f"\nMaking predictions for {len(valid_indices)} start points:")
-    # print(f"Valid start indices: {valid_indices}")
-    # print(f"Price series length: {len(price_series)}")
-    # print(f"Predicting {n_steps} steps for each start point")
+    if debug:
+        print(f"\nIndex validation summary:")
+        print(f"Total indices: {len(start_indices)}")
+        if skipped_early > 0:
+            print(f"Skipped {skipped_early} early indices (need {total_required_history} points of history)")
+        if skipped_invalid > 0:
+            print(f"Skipped {skipped_invalid} indices with invalid prices")
+        print(f"Valid indices remaining: {len(valid_indices)}")
+        print(f"Valid index range: [{min(valid_indices)}, {max(valid_indices)}]")
     
     # Load model
     model = load_model_from_checkpoint(
@@ -373,8 +416,13 @@ def predict_from_checkpoint(
     # Make predictions for each start index
     predictions_list = []
     for start_idx in valid_indices:
-        # Get initial sequence
-        initial_sequence = price_series[max(0, start_idx - sequence_length):start_idx + 1]
+        # Get initial sequence with warmup period
+        initial_sequence = price_series[max(0, start_idx - sequence_length - max_lookback):start_idx + 1]
+        
+        # Check if we have enough data for warmup
+        if len(initial_sequence) < max_lookback + 1:
+            print(f"Warning: Not enough historical data for warmup at index {start_idx}")
+            continue
         
         # Get true future values if using forcing
         true_future = None
@@ -410,8 +458,8 @@ def predict_from_checkpoint(
     
     # Plot results with multi-horizon parameters
     plot_predictions(
-        price_series, 
-        valid_indices, 
+        price_series,
+        valid_indices,
         predictions_list,
         use_multi_horizon=use_multi_horizon,
         horizon_weights=horizon_weights,

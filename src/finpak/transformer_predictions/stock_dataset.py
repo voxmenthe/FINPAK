@@ -10,6 +10,7 @@ class StockFeatures:
     targets: torch.Tensor   # Shape: (n_samples, n_targets)
     feature_names: list[str]
     target_names: list[str]
+    valid_start_idx: int    # Index where features become valid after initialization period
 
 class StockDataset(Dataset):
     def __init__(
@@ -18,7 +19,8 @@ class StockDataset(Dataset):
         targets: torch.Tensor,
         sequence_length: int = 60,
         feature_names: Optional[list[str]] = None,
-        target_names: Optional[list[str]] = None
+        target_names: Optional[list[str]] = None,
+        valid_start_idx: int = 0  # Add parameter for valid start index
     ):
         """
         Dataset for sequence prediction
@@ -29,6 +31,7 @@ class StockDataset(Dataset):
             sequence_length: Number of time steps to use as input
             feature_names: Optional list of feature names
             target_names: Optional list of target names
+            valid_start_idx: Index where features become valid after initialization period
         """
         if len(features) != len(targets):
             raise ValueError("Features and targets must have same length")
@@ -38,9 +41,17 @@ class StockDataset(Dataset):
         self.sequence_length = sequence_length
         self.feature_names = feature_names
         self.target_names = target_names
+        self.valid_start_idx = valid_start_idx
+        
+        if True:
+            print(f"Dataset initialized with:")
+            print(f"Features shape: {features.shape}")
+            print(f"Targets shape: {targets.shape}")
+            print(f"Sequence length: {sequence_length}")
         
     def __len__(self):
-        return len(self.features) - self.sequence_length
+        # Only return sequences that start after the initialization period
+        return len(self.features) - self.sequence_length - self.valid_start_idx
         
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -48,6 +59,26 @@ class StockDataset(Dataset):
             x: Feature sequence of shape (sequence_length, n_features)
             y: Target values of shape (n_targets,)
         """
-        x = self.features[idx:idx + self.sequence_length]
-        y = self.targets[idx + self.sequence_length]
+        # Offset idx by valid_start_idx to skip initialization period
+        actual_idx = idx + self.valid_start_idx
+        
+        # Get sequence of features
+        x = self.features[actual_idx:actual_idx + self.sequence_length]  # Shape: (sequence_length, n_features)
+        
+        # Get target values
+        y = self.targets[actual_idx + self.sequence_length - 1]  # Shape: (n_targets,)
+        
         return x, y
+        
+    def collate_fn(self, batch: list) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Custom collate function to ensure proper batching of sequences"""
+        # Separate features and targets
+        features, targets = zip(*batch)
+        
+        # Stack features into a single tensor (batch_size, sequence_length, n_features)
+        features = torch.stack(features)
+        
+        # Stack targets into a single tensor (batch_size, n_targets)
+        targets = torch.stack(targets)
+        
+        return features, targets

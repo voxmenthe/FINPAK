@@ -9,15 +9,8 @@ from preprocessing import create_stock_features, combine_price_series
 def create_dataloaders(
     train_prices: torch.Tensor,
     val_prices: torch.Tensor,
-    batch_size: int = 32,
-    sequence_length: int = 0,
+    config: dict,
     num_workers: int = 4,
-    return_periods: List[int] = [1, 5],
-    sma_periods: List[int] = [20],
-    target_periods: List[int] = [1, 5],
-    use_volatility: bool = False,
-    use_momentum: bool = False,
-    momentum_periods: List[int] = [9, 28, 47],
     debug: bool = False
 ) -> Tuple[DataLoader, DataLoader, List[str], List[str]]:
     """
@@ -26,29 +19,24 @@ def create_dataloaders(
     Args:
         train_prices: Tensor of training set price data
         val_prices: Tensor of validation set price data
-        batch_size: Batch size for dataloaders
-        sequence_length: Length of sequences for transformer
+        config: Configuration dictionary where:
+            config['data_params'] contains return_periods, sma_periods, target_periods, use_volatility, use_momentum, momentum_periods
+            config['train_params'] contains batch_size, and sequence_length
         num_workers: Number of worker processes for data loading
-        return_periods: List of periods for calculating returns
-        sma_periods: List of periods for calculating SMAs
-        target_periods: List of periods for target returns
         debug: Whether to print debug information
-    """
+    """  
+
     # Process features for training data
     train_features = create_stock_features(
         prices=train_prices,
-        return_periods=return_periods,
-        sma_periods=sma_periods,
-        target_periods=target_periods,
+        config=config,
         debug=debug
     )
 
     # Process features for validation data
     val_features = create_stock_features(
         prices=val_prices,
-        return_periods=return_periods,
-        sma_periods=sma_periods,
-        target_periods=target_periods,
+        config=config,
         debug=debug
     )
 
@@ -56,23 +44,25 @@ def create_dataloaders(
     train_dataset = StockDataset(
         features=train_features.features,
         targets=train_features.targets,
-        sequence_length=sequence_length,
+        sequence_length=config['data_params']['sequence_length'],
         feature_names=train_features.feature_names,
-        target_names=train_features.target_names
+        target_names=train_features.target_names,
+        valid_start_idx=train_features.valid_start_idx  # Pass initialization period
     )
 
     val_dataset = StockDataset(
         features=val_features.features,
         targets=val_features.targets,
-        sequence_length=sequence_length,
+        sequence_length=config['data_params']['sequence_length'],
         feature_names=val_features.feature_names,
-        target_names=val_features.target_names
+        target_names=val_features.target_names,
+        valid_start_idx=val_features.valid_start_idx  # Pass initialization period
     )
 
     # Create dataloaders
     train_loader = DataLoader(
         train_dataset,
-        batch_size=batch_size,
+        batch_size=config['train_params']['batch_size'],
         shuffle=True,
         num_workers=num_workers,
         pin_memory=True
@@ -80,7 +70,7 @@ def create_dataloaders(
 
     val_loader = DataLoader(
         val_dataset,
-        batch_size=batch_size,
+        batch_size=config['train_params']['batch_size'],
         shuffle=False,
         num_workers=num_workers,
         pin_memory=True
@@ -100,14 +90,10 @@ def create_subset_dataloaders(
     train_tickers: list,
     val_tickers: list,
     config: dict,
-    batch_size: int,
-    sequence_length: int,
-    return_periods: list,
-    sma_periods: list,
-    target_periods: list,
     debug: bool = False
 ) -> tuple:
     """Create dataloaders for the current subset of tickers."""
+
     # Process training price series for subset
     train_price_series = []
     for ticker in train_tickers:
@@ -180,14 +166,7 @@ def create_subset_dataloaders(
     train_loader, val_loader, feature_names, target_names = create_dataloaders(
         train_prices=combined_train_prices,
         val_prices=combined_val_prices,
-        batch_size=batch_size,
-        sequence_length=sequence_length,
-        return_periods=return_periods,
-        sma_periods=sma_periods,
-        target_periods=target_periods,
-        use_volatility=config['data_params']['use_volatility'],
-        use_momentum=config['data_params']['use_momentum'],
-        momentum_periods=config['data_params']['momentum_periods'],
+        config=config,
         debug=debug
     )
 

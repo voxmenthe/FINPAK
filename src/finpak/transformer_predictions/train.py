@@ -45,11 +45,6 @@ def train_model(
     train_cycler: Optional[TickerCycler] = None,
     train_df: Optional[pd.DataFrame] = None,
     val_df: Optional[pd.DataFrame] = None,
-    batch_size: Optional[int] = None,
-    sequence_length: Optional[int] = None,
-    return_periods: Optional[List[int]] = None,
-    sma_periods: Optional[List[int]] = None,
-    target_periods: Optional[List[int]] = None,
     debug: bool = False
 ) -> Tuple[List[float], List[float]]:
     """
@@ -61,17 +56,12 @@ def train_model(
         val_loader: DataLoader for validation data
         device: Device to train on
         start_epoch: Epoch to start/resume training from
-        config: Configuration dictionary containing all training parameters
+        config: Configuration dictionary
         checkpoint_dir: Directory to save checkpoints
         validation_cycler: Optional TickerCycler for validation set cycling
         train_cycler: Optional TickerCycler for training set cycling
         train_df: DataFrame containing training data
         val_df: DataFrame containing validation data
-        batch_size: Batch size for dataloaders
-        sequence_length: Length of sequences for transformer
-        return_periods: List of periods for calculating returns
-        sma_periods: List of periods for calculating SMAs
-        target_periods: List of periods for target returns
         debug: Whether to print debug information
     """
     if config is None:
@@ -91,6 +81,10 @@ def train_model(
     
     # Training cycling parameters
     enable_train_cycling = train_cycler is not None
+    
+    # Track cycle completion status
+    train_cycle_completed = not enable_train_cycling  # True if train cycling is disabled
+    val_cycle_completed = not enable_validation_cycling  # True if validation cycling is disabled
     
     min_delta = train_params.get('min_delta', 0.0)
 
@@ -238,10 +232,38 @@ def train_model(
             
             optimizer.zero_grad()
             
+            # Debug prints for input data
+            if debug:
+                print("\n=== Training Batch Debug ===")
+                print(f"Input stats: min={batch_x.min().item():.4f}, max={batch_x.max().item():.4f}")
+                print(f"Target stats: min={batch_y.min().item():.4f}, max={batch_y.max().item():.4f}")
+                print(f"NaN in input: {torch.isnan(batch_x).sum().item()}")
+                print(f"NaN in target: {torch.isnan(batch_y).sum().item()}")
+            
             predictions = model(batch_x)
             loss = F.mse_loss(predictions, batch_y)
             
+            # Debug prints for predictions and loss
+            if debug:
+                print(f"Pred stats: min={predictions.min().item():.4f}, max={predictions.max().item():.4f}")
+                print(f"NaN in predictions: {torch.isnan(predictions).sum().item()}")
+                print(f"Loss: {loss.item():.4f}")
+                if torch.isnan(loss):
+                    print("WARNING: NaN loss detected!")
+                    print("Last learning rate:", scheduler.get_last_lr()[0])
+            
             loss.backward()
+            
+            # # Debug prints for gradients
+            # if debug:
+            #     for name, param in model.named_parameters():
+            #         if param.grad is not None:
+            #             grad_norm = param.grad.norm().item()
+            #             if torch.isnan(param.grad).any():
+            #                 print(f"NaN gradient in {name}")
+            #             if grad_norm > 1.0:
+            #                 print(f"Large gradient in {name}: {grad_norm:.4f}")
+            
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             scheduler.step()
@@ -264,6 +286,9 @@ def train_model(
                 
         current_val_loss = val_loss / len(val_loader)
         val_losses.append(current_val_loss)
+        
+        # Initialize should_continue before early stopping check
+        should_continue = True
         
         # Save checkpoint if it's among the best
         checkpoint = {
@@ -339,105 +364,106 @@ def train_model(
             print(f"Early stopping triggered after epoch {epoch}")
             should_continue = False
             
-            if enable_train_cycling and train_cycler.has_more_subsets():
-                print(f"Switching to next training subset")
-                train_cycler.next_subset()
-                
-                # Reset early stopping when cycling to new training subset
-                early_stop = EarlyStopping(
-                    patience=train_params['patience'],
-                    min_delta=min_delta,
-                    max_checkpoints=train_params['max_checkpoints'],
-                    min_epochs=min_epochs_before_stopping
-                )
-                
-                # Move to next training subset
-                train_loader = create_subset_dataloaders(
-                    train_df=train_df,
-                    val_df=val_df,
-                    train_tickers=train_cycler.get_current_subset(),
-                    val_tickers=validation_cycler.get_current_subset(),
-                    config=config,
-                    batch_size=batch_size,
-                    sequence_length=sequence_length,
-                    return_periods=return_periods,
-                    sma_periods=sma_periods,
-                    target_periods=target_periods,
-                    debug=debug
-                )[0]  # Only need train_loader
-                
-                should_continue = True
-                
-                # If validation cycler is exhausted but we have more training subsets,
-                # reset validation cycler to start from beginning
-                if enable_validation_cycling and not validation_cycler.has_more_subsets():
-                    print(f"\nResetting validation cycler to beginning as training continues")
-                    validation_cycler.reset()
+            if enable_train_cycling:
+                if train_cycler.has_more_subsets():
+                    # Move to next training subset and update validation subset
+                    print(f"\nSwitching to next training subset after epoch {epoch}")
+                    train_cycler.next_subset()
                     
-                    # Reset early stopping for new validation cycle
-                    early_stop = EarlyStopping(
-                        patience=train_params['patience'],
-                        min_delta=min_delta,
-                        max_checkpoints=train_params['max_checkpoints'],
-                        min_epochs=min_epochs_before_stopping
+                    # Also move to next validation subset if cycling is enabled
+                    if enable_validation_cycling:
+                        if not validation_cycler.has_more_subsets():
+                            print(f"\nResetting validation cycler to beginning as training continues")
+                            validation_cycler.reset()
+                            val_cycle_completed = True
+                        validation_cycler.next_subset()
+                    
+                    # Create new dataloaders with updated subsets
+                    train_loader, val_loader = create_subset_dataloaders(
+                        train_df=train_df,
+                        val_df=val_df,
+                        train_tickers=train_cycler.get_current_subset(),
+                        val_tickers=validation_cycler.get_current_subset() if enable_validation_cycling else None,
+                        config=config,
+                        debug=debug
                     )
                     
-                    val_loader = create_subset_dataloaders(
+                    # Reset early stopping for new subset
+                    early_stop.start_new_cycle()
+                    should_continue = True
+                    
+                    if debug:
+                        status = early_stop.get_improvement_status()
+                        print(f"Starting new cycle. Best loss: {status['current_best_loss']:.7f}, Global best: {status['global_best_loss']:.7f}")
+                
+                elif enable_validation_cycling and not val_cycle_completed:
+                    # Train cycler is exhausted but validation hasn't completed a full cycle
+                    # Reset train cycler and continue
+                    print(f"\nResetting train cycler to continue validation cycling")
+                    train_cycler.reset()
+                    train_cycle_completed = True
+                    train_cycler.next_subset()
+                    
+                    if not validation_cycler.has_more_subsets():
+                        validation_cycler.reset()
+                        val_cycle_completed = True
+                    validation_cycler.next_subset()
+                    
+                    # Create new dataloaders with updated subsets
+                    train_loader, val_loader = create_subset_dataloaders(
                         train_df=train_df,
                         val_df=val_df,
                         train_tickers=train_cycler.get_current_subset(),
                         val_tickers=validation_cycler.get_current_subset(),
                         config=config,
-                        batch_size=batch_size,
-                        sequence_length=sequence_length,
-                        return_periods=return_periods,
-                        sma_periods=sma_periods,
-                        target_periods=target_periods,
                         debug=debug
-                    )[1]  # Only need val_loader
+                    )
+                    
+                    # Reset early stopping for new subset
+                    early_stop.start_new_cycle()
+                    should_continue = True
+                    
+                    if debug:
+                        status = early_stop.get_improvement_status()
+                        print(f"Starting new cycle. Best loss: {status['current_best_loss']:.7f}, Global best: {status['global_best_loss']:.7f}")
+                else:
+                    train_cycle_completed = True
             
             elif enable_validation_cycling and validation_cycler.has_more_subsets():
-                # Move to next validation subset
+                # Only cycle validation if train cycling is not enabled
                 print(f"\nSwitching to next validation subset after epoch {epoch}")
                 validation_cycler.next_subset()
                 
-                # Reset early stopping when cycling to new validation subset
-                early_stop = EarlyStopping(
-                    patience=train_params['patience'],
-                    min_delta=min_delta,
-                    max_checkpoints=train_params['max_checkpoints'],
-                    min_epochs=min_epochs_before_stopping
-                )
-                
-                val_loader = create_subset_dataloaders(
-                    train_df=train_df,
-                    val_df=val_df,
-                    train_tickers=train_cycler.get_current_subset(),
-                    val_tickers=validation_cycler.get_current_subset(),
-                    config=config,
-                    batch_size=batch_size,
-                    sequence_length=sequence_length,
-                    return_periods=return_periods,
-                    sma_periods=sma_periods,
-                    target_periods=target_periods,
-                    debug=debug
-                )[1]  # Only need val_loader
-
-                should_continue = True
-
-            if should_continue:
-                # Reset best loss tracking for the new subset
-                early_stop.best_loss = None
-                early_stop.counter = 0
-                early_stop.early_stop = False
-
-            else:
-                print(f"\nEarly stopping triggered after epoch {epoch}")
-                # Save final checkpoint
-                final_checkpoint_name = f"{config['train_params']['prefix']}_final_id_{config['train_params']['run_id']}_arc_{config['train_params']['architecture_version']}_e{epoch}_valloss_{current_val_loss:.7f}.pt"
-                torch.save(checkpoint, os.path.join(checkpoint_dir, final_checkpoint_name))
-                print(f"Saved final chkpt: {final_checkpoint_name}")
-                break
+                # Start new cycle and check if we should stop globally
+                if early_stop.start_new_cycle():
+                    print(f"\nStopping training - No improvement for {early_stop.max_cycles_without_improvement} cycles")
+                    print(f"Global best loss: {early_stop.global_best_loss:.7f}")
+                    should_continue = False
+                else:
+                    val_loader = create_subset_dataloaders(
+                        train_df=train_df,
+                        val_df=val_df,
+                        train_tickers=train_cycler.get_current_subset() if train_cycler else None,
+                        val_tickers=validation_cycler.get_current_subset(),
+                        config=config,
+                        debug=debug
+                    )[1]  # Only need val_loader
+                    
+                    should_continue = True
+                    
+                    if debug:
+                        status = early_stop.get_improvement_status()
+                        print(f"Starting new cycle. Best loss: {status['current_best_loss']:.7f}, Global best: {status['global_best_loss']:.7f}")
+        
+        # Only reset early stopping flags if we're actually continuing
+        # This prevents resetting when we should be stopping
+        if not should_continue:
+            print(f"\nEarly stopping triggered after epoch {epoch}")
+            # Save final checkpoint
+            final_checkpoint_name = f"{config['train_params']['prefix']}_final_id_{config['train_params']['run_id']}_arc_{config['train_params']['architecture_version']}_e{epoch}_valloss_{current_val_loss:.7f}.pt"
+            torch.save(checkpoint, os.path.join(checkpoint_dir, final_checkpoint_name))
+            print(f"Saved final chkpt: {final_checkpoint_name}")
+            break
         
         if (epoch + 1) % train_params['print_every'] == 0:
             current_step = epoch * len(train_loader)  # Calculate current step

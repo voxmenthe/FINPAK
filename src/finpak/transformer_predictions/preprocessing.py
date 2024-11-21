@@ -19,7 +19,12 @@ def calculate_returns(prices: torch.Tensor, period: int, debug: bool = False) ->
     if debug:
         print(f"\nCalculating {period}-day returns:")
         print(f"First few prices: {prices[:5].tolist()}")
+        print(f"Prices shape: {prices.shape}")
 
+    # Ensure prices is 2D if it's not already
+    if len(prices.shape) == 1:
+        prices = prices.unsqueeze(-1)
+    
     # Add small epsilon to denominator to prevent division by zero
     eps = 1e-8
     returns = (prices[period:] - prices[:-period]) / (prices[:-period] + eps)
@@ -30,6 +35,7 @@ def calculate_returns(prices: torch.Tensor, period: int, debug: bool = False) ->
     # Debug: Print some sample returns
     if debug:
         print(f"First few {period}-day returns: {returns[:5].tolist()}")
+        print(f"Returns shape: {returns.shape}")
         finite_returns = returns[torch.isfinite(returns)]
         if len(finite_returns) > 0:
             print(f"Return statistics:")
@@ -40,9 +46,15 @@ def calculate_returns(prices: torch.Tensor, period: int, debug: bool = False) ->
         else:
             print("Warning: No finite returns found!")
 
-    # Pad to maintain length
-    padding = torch.zeros(period, dtype=prices.dtype, device=prices.device)
-    return torch.cat([padding, returns])
+    # Create padding with correct shape
+    padding = torch.zeros((period,) + returns.shape[1:], dtype=prices.dtype, device=prices.device)
+    padded_returns = torch.cat([padding, returns], dim=0)
+    
+    # If input was 1D, make output 1D
+    if len(prices.shape) == 2 and prices.shape[1] == 1:
+        padded_returns = padded_returns.squeeze(-1)
+        
+    return padded_returns
 
 def calculate_sma(prices: torch.Tensor, window: int) -> torch.Tensor:
     """Calculate Simple Moving Average"""
@@ -53,17 +65,32 @@ def calculate_sma(prices: torch.Tensor, window: int) -> torch.Tensor:
 
 def create_stock_features(
     prices: torch.Tensor,
-    return_periods: List[int] = [1, 5],
-    sma_periods: List[int] = [20],
-    target_periods: List[int] = [1, 5],
-    use_volatility: bool = False,
-    use_momentum: bool = False,
-    momentum_periods: List[int] = [9, 28, 47],
+    config: dict,
     debug: bool = False
 ) -> StockFeatures:
     """
     Create feature matrix and target variables from price series
+    
+    Returns:
+        StockFeatures object containing:
+        - features: Tensor of shape (n_samples, n_features)
+        - targets: Tensor of shape (n_samples, n_targets)
+        - feature_names: List of feature names
+        - target_names: List of target names
+        - valid_start_idx: Index where features become valid after initialization period
     """
+    print("\n=== Feature Creation Debug ===")
+    print(f"Input price stats: min={prices.min().item():.4f}, max={prices.max().item():.4f}")
+    print(f"NaN in prices: {torch.isnan(prices).sum().item()}")
+    
+    # Extract parameters from config
+    use_volatility = config['data_params']['use_volatility']
+    use_momentum = config['data_params']['use_momentum']
+    momentum_periods = config['data_params']['momentum_periods']
+    return_periods = config['data_params']['return_periods']
+    sma_periods = config['data_params']['sma_periods']
+    target_periods = config['data_params']['target_periods']
+
     # Calculate the initialization period needed
     max_lookback = max([
         max(sma_periods) if sma_periods else 0,
@@ -78,13 +105,6 @@ def create_stock_features(
         print(f"Price series length: {len(prices)}")
         print(f"Required initialization period: {max_lookback}")
         print(f"First few prices: {prices[:5].tolist()}")
-        print(f"Return periods: {return_periods}")
-        print(f"SMA periods: {sma_periods}")
-        print(f"Target periods: {target_periods}")
-        if use_volatility:
-            print(f"Using volatility features with return periods: {return_periods}")
-        if use_momentum:
-            print(f"Using momentum features with periods: {momentum_periods}")
 
     # Ensure we have enough data points
     if len(prices) <= max_lookback:
@@ -95,67 +115,105 @@ def create_stock_features(
 
     # Calculate return features
     for period in return_periods:
-        returns = calculate_returns(prices, period, debug=debug)
-        feature_list.append(returns[max_lookback:])  # Only use data after initialization
+        returns = calculate_returns(prices, period)
+        if debug:
+            print(f"\n{period}-day returns:")
+            print(f"Shape: {returns.shape}")
+            print(f"Stats: min={returns.min().item():.4f}, max={returns.max().item():.4f}")
+            print(f"NaN count: {torch.isnan(returns).sum().item()}")
+        feature_list.append(returns)
         feature_names.append(f'{period}d_return')
 
     # Calculate SMA features
     for period in sma_periods:
         sma = calculate_sma(prices, period)
         # Calculate percentage difference from SMA
-        sma_diff = (prices - sma) / sma
-        feature_list.append(sma_diff[max_lookback:])  # Only use data after initialization
+        sma_diff = (prices - sma) / (sma + 1e-8)  # Add epsilon to prevent division by zero
+        if debug:
+            print(f"\nSMA {period} diff:")
+            print(f"Shape: {sma_diff.shape}")
+            print(f"Stats: min={sma_diff.min().item():.4f}, max={sma_diff.max().item():.4f}")
+            print(f"NaN count: {torch.isnan(sma_diff).sum().item()}")
+        feature_list.append(sma_diff)
         feature_names.append(f'sma{period}_diff')
 
     if use_volatility:
         # Add realized volatility features
         for period in return_periods:
             returns = calculate_returns(prices, period)
+            # Use rolling window for volatility calculation
             volatility = torch.zeros_like(returns)
-            for i in range(period, len(returns)):
-                volatility[i] = returns[i-period:i].std()
-            feature_list.append(volatility[max_lookback:])  # Only use data after initialization
+            
+            # Ensure minimum window size for std calculation
+            min_window = max(5, period // 5)  # Use at least 5 points or 1/5 of period
+            
+            for i in range(min_window, len(returns)):
+                # Use unbiased estimator and ensure minimum window size
+                window = returns[max(0, i-period):i]
+                if len(window) >= min_window:
+                    volatility[i] = window.std(unbiased=True)
+            
+            if debug:
+                print(f"\n{period}-day volatility:")
+                print(f"Shape: {volatility.shape}")
+                print(f"Stats: min={volatility.min().item():.4f}, max={volatility.max().item():.4f}")
+                print(f"NaN count: {torch.isnan(volatility).sum().item()}")
+            
+            feature_list.append(volatility)
             feature_names.append(f'{period}d_volatility')
 
     if use_momentum:
         # Add momentum indicators
         for period in momentum_periods:
             momentum = calculate_returns(prices, period)
-            feature_list.append(momentum[max_lookback:])  # Only use data after initialization
+            if debug:
+                print(f"\n{period}-day momentum:")
+                print(f"Shape: {momentum.shape}")
+                print(f"Stats: min={momentum.min().item():.4f}, max={momentum.max().item():.4f}")
+                print(f"NaN count: {torch.isnan(momentum).sum().item()}")
+            feature_list.append(momentum)
             feature_names.append(f'{period}d_momentum')
 
-    # Stack features into a single tensor
-    features = torch.stack(feature_list, dim=1)
-
+    # Stack all features first, then slice
+    features = torch.stack(feature_list, dim=1)  # Shape: (n_samples, n_features)
+    
     # Calculate target variables (future returns)
     target_list = []
     target_names = []
     
     for period in target_periods:
         future_returns = calculate_returns(prices, period)
-        target_list.append(future_returns[max_lookback:])  # Only use data after initialization
+        if debug:
+            print(f"\n{period}-day future returns:")
+            print(f"Shape: {future_returns.shape}")
+            print(f"Stats: min={future_returns.min().item():.4f}, max={future_returns.max().item():.4f}")
+            print(f"NaN count: {torch.isnan(future_returns).sum().item()}")
+        target_list.append(future_returns)
         target_names.append(f'{period}d_future_return')
 
-    targets = torch.stack(target_list, dim=1)
+    targets = torch.stack(target_list, dim=1)  # Shape: (n_samples, n_targets)
+
+    # Now slice both features and targets after stacking
+    features = features[max_lookback:]
+    targets = targets[max_lookback:]
 
     if debug:
-        print(f"\nFeature matrix shape: {features.shape}")
-        print(f"Target matrix shape: {targets.shape}")
-        print(f"Feature names: {feature_names}")
-        print(f"Target names: {target_names}")
-        
-        # Print statistics for each feature
-        print("\nFeature statistics:")
-        for i, name in enumerate(feature_names):
-            feature_data = features[:, i]
-            print(f"\n{name}:")
-            print(f"Mean: {feature_data.mean():.4f}")
-            print(f"Std: {feature_data.std():.4f}")
-            print(f"Min: {feature_data.min():.4f}")
-            print(f"Max: {feature_data.max():.4f}")
-            print(f"NaN count: {torch.isnan(feature_data).sum()}")
+        print("\n=== Final Feature Stats ===")
+        print(f"Features shape: {features.shape}")
+        print(f"Features stats: min={features.min().item():.4f}, max={features.max().item():.4f}")
+        print(f"NaN in features: {torch.isnan(features).sum().item()}")
+        print(f"Targets shape: {targets.shape}")
+        print(f"Targets stats: min={targets.min().item():.4f}, max={targets.max().item():.4f}")
+        print(f"NaN in targets: {torch.isnan(targets).sum().item()}")
 
-    return StockFeatures(features, targets, feature_names, target_names)
+    # Create StockFeatures object with valid_start_idx
+    return StockFeatures(
+        features=features,  # Shape: (n_samples, n_features)
+        targets=targets,    # Shape: (n_samples, n_targets)
+        feature_names=feature_names,
+        target_names=target_names,
+        valid_start_idx=max_lookback  # Add this field to track where valid data starts
+    )
 
 
 def combine_price_series(price_series_list: List[torch.Tensor], debug: bool = False) -> torch.Tensor:

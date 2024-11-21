@@ -30,7 +30,7 @@ if __name__ == "__main__":
 
     print(f"Using device: {device}")
 
-    CONFIG = all_configs["vMP003a"]
+    CONFIG = all_configs["vMP003b"]
     print(CONFIG)
     # Set this to a checkpoint file path to resume training or None to start from scratch
     checkpoint_path = None  # 'checkpoints/mpv005a_v2_e123_valloss_0.0020898.pt' # 'checkpoints/mpv005_v2_e81_valloss_0.0019177.pt' # None #'mpv1a_e99_valloss_0.0033764.pt' # 'mpv1a_e_77_valloss_0.0024084.pt' # 'mpv000_e245_valloss_0.0016670.pt' # None # 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  
@@ -54,14 +54,24 @@ if __name__ == "__main__":
     return_periods = CONFIG['data_params']['return_periods']
     sma_periods = CONFIG['data_params']['sma_periods']
     target_periods = CONFIG['data_params']['target_periods']
+    use_volatility = CONFIG['data_params'].get('use_volatility', False)
+    use_momentum = CONFIG['data_params'].get('use_momentum', False)
+    momentum_periods = CONFIG['data_params'].get('momentum_periods', [9, 28, 47])
+
+    # Calculate total number of features
+    num_features = len(return_periods) + len(sma_periods)
+    if use_volatility:
+        num_features += len(return_periods)
+    if use_momentum:
+        num_features += len(momentum_periods)
 
     # Validation cycling parameters
     validation_subset_size = CONFIG['train_params']['validation_subset_size']  # Number of tickers in each validation subset
     validation_overlap = CONFIG['train_params']['validation_overlap']  # Number of tickers to overlap between subsets
 
-    DEBUG = False  # True
+    DEBUG = False
     MODEL_PARAMS = CONFIG['model_params']
-    
+
     # Training cycling parameters
     train_subset_size = CONFIG['train_params']['train_subset_size']
     train_overlap = CONFIG['train_params']['train_overlap']
@@ -80,8 +90,8 @@ if __name__ == "__main__":
         val_df.index = pd.to_datetime(val_df.index)
         
         # Forward fill any missing values within each ticker's series
-        train_df = train_df.fillna(method='ffill')
-        val_df = val_df.fillna(method='ffill')
+        train_df = train_df.ffill() # fillna(method='ffill')
+        val_df = val_df.ffill() # fillna(method='ffill')
         
         # Drop any remaining NaN values
         train_df = train_df.dropna(axis=0, how='any')
@@ -154,29 +164,13 @@ if __name__ == "__main__":
         train_tickers=initial_train_tickers,
         val_tickers=initial_val_tickers,
         config=CONFIG,
-        batch_size=batch_size,
-        sequence_length=sequence_length,
-        return_periods=return_periods,
-        sma_periods=sma_periods,
-        target_periods=target_periods,
         debug=DEBUG
     )
 
-    if DEBUG:
-        # Add logging
-        print("\nFeature Information:")
-        print(f"Number of features: {len(train_loader.dataset.feature_names)}")
-        print(f"Features: {train_loader.dataset.feature_names}")
-        print(f"Number of targets: {len(train_loader.dataset.target_names)}")
-        print(f"Targets: {train_loader.dataset.target_names}")
-        print(f"\nBatch Information:")
-        print(f"Training batches: {len(train_loader)}")
-        print(f"Validation batches: {len(val_loader)}")
-
     # Initialize model with correct input/output dimensions
     model = TimeSeriesDecoder(
-        d_input=len(train_loader.dataset.feature_names),
-        n_outputs=len(train_loader.dataset.target_names),
+        d_input=num_features,
+        n_outputs=len(target_periods),
         **MODEL_PARAMS,
     )
 
@@ -206,10 +200,5 @@ if __name__ == "__main__":
         train_cycler=train_cycler,
         train_df=train_df,
         val_df=val_df,
-        batch_size=batch_size,
-        sequence_length=sequence_length,
-        return_periods=return_periods,
-        sma_periods=sma_periods,
-        target_periods=target_periods,
         debug=DEBUG
     )

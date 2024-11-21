@@ -7,6 +7,7 @@ class EarlyStopping:
         1. Maintains a list of best models
         2. Enforces a minimum number of epochs before stopping
         3. Tracks recent losses for trend analysis
+        4. Tracks both cycle-specific and global best losses
         
         Args:
             patience (int): Number of epochs to wait before stopping after last improvement
@@ -19,16 +20,19 @@ class EarlyStopping:
         self.min_delta = min_delta
         self.mode = mode
         self.counter = 0
-        self.best_loss = None
+        self.best_loss = None  # Best loss for current cycle
+        self.global_best_loss = None  # Best loss across all cycles
         self.early_stop = False
         self.min_delta *= 1 if mode == 'min' else -1
         self.best_losses = []  # Track the best losses
         self.recent_losses = []  # Track the recent losses
-        self.max_checkpoints = max_checkpoints  # Use max_checkpoints for best losses
+        self.max_checkpoints = max_checkpoints
         self.min_epochs = min_epochs
         self.current_epoch = 0
-        self.epochs_since_improvement = 0  # Track epochs since last improvement
-        self.last_improvement_epoch = 0  # Track when we last saw an improvement
+        self.epochs_since_improvement = 0
+        self.last_improvement_epoch = 0
+        self.cycles_without_improvement = 0  # Track cycles without improvement
+        self.max_cycles_without_improvement = 2  # Stop after this many cycles without improvement
 
     def __call__(self, current_loss):
         self.current_epoch += 1
@@ -37,21 +41,31 @@ class EarlyStopping:
         if self.current_epoch < self.min_epochs:
             return False
 
+        # Initialize best losses if this is the first call
         if self.best_loss is None:
             self.best_loss = current_loss
+            self.global_best_loss = current_loss if self.global_best_loss is None else self.global_best_loss
             self.last_improvement_epoch = self.current_epoch
             return False
         
         if self.mode == 'min':
             delta = current_loss - self.best_loss
+            global_delta = current_loss - self.global_best_loss
         else:
             delta = self.best_loss - current_loss
+            global_delta = self.global_best_loss - current_loss
             
+        # Check for improvement in current cycle
         if delta < self.min_delta:
             self.best_loss = current_loss
             self.counter = 0
             self.epochs_since_improvement = 0
             self.last_improvement_epoch = self.current_epoch
+            
+            # Update global best if this is better
+            if global_delta < self.min_delta:
+                self.global_best_loss = current_loss
+                self.cycles_without_improvement = 0
         else:
             self.counter += 1
             self.epochs_since_improvement += 1
@@ -63,7 +77,7 @@ class EarlyStopping:
         if len(self.recent_losses) > self.patience:
             self.recent_losses.pop(0)
 
-        # Update best losses
+        # Update best losses list
         if len(self.best_losses) < self.max_checkpoints:
             self.best_losses.append(current_loss)
             self.best_losses.sort(reverse=(self.mode == 'max'))
@@ -73,15 +87,35 @@ class EarlyStopping:
                 self.best_losses[-1] = current_loss
                 self.best_losses.sort(reverse=(self.mode == 'max'))
 
-        # Check if none of the recent losses are in the best losses
-        if all(loss not in self.best_losses for loss in self.recent_losses):
-            self.early_stop = True
-
         return self.early_stop
+
+    def start_new_cycle(self):
+        """Reset cycle-specific tracking while maintaining global tracking"""
+        if self.best_loss is not None:  # Only count cycles where we had some training
+            if self.mode == 'min':
+                delta = self.best_loss - self.global_best_loss
+            else:
+                delta = self.global_best_loss - self.best_loss
+                
+            # If this cycle didn't improve on global best, increment counter
+            if delta >= self.min_delta:
+                self.cycles_without_improvement += 1
+        
+        # Reset cycle-specific tracking
+        self.best_loss = None
+        self.counter = 0
+        self.early_stop = False
+        self.recent_losses = []
+        
+        # If we haven't improved for too many cycles, signal to stop
+        return self.cycles_without_improvement >= self.max_cycles_without_improvement
 
     def get_improvement_status(self):
         return {
             'epochs_since_improvement': self.epochs_since_improvement,
             'last_improvement_epoch': self.last_improvement_epoch,
-            'early_stop': self.early_stop
+            'early_stop': self.early_stop,
+            'cycles_without_improvement': self.cycles_without_improvement,
+            'current_best_loss': self.best_loss,
+            'global_best_loss': self.global_best_loss
         }
