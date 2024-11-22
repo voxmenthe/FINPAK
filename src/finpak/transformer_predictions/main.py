@@ -12,7 +12,7 @@ from ticker_cycler import TickerCycler
 from data_loading import create_dataloaders, create_subset_dataloaders
 
 from configs import all_configs
-from ticker_configs import train_tickers_v7, val_tickers_v7
+from ticker_configs import train_tickers_v8, val_tickers_v8
 
 
 def get_device():
@@ -37,15 +37,15 @@ if __name__ == "__main__":
 
     checkpoint_dir = 'checkpoints'
 
-    train_tickers = train_tickers_v7
-    val_tickers = val_tickers_v7
+    train_tickers = train_tickers_v8
+    val_tickers = val_tickers_v8
 
     if CONFIG['data_params'].get('reverse_tickers', False):
         train_tickers = train_tickers[::-1]
         val_tickers = val_tickers[::-1]
 
-    train_df_fname = 'train_df_v7.csv'
-    val_df_fname = 'val_df_v7.csv'
+    train_df_fname = 'train_df_v8.csv'
+    val_df_fname = 'val_df_v8.csv'
     FORCE_RELOAD = False
 
     # Extract only parameters needed for data loading and model initialization

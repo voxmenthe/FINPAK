@@ -184,7 +184,7 @@ val_tickers_v7 = [
 train_tickers_v8 = [
     'AAPL', 'AAL', 'ACN', 'AMD', 'AMZN', 'ANF', 
     'APTV', 'AVAV', 'AVGO', 'ADBE', 'ARKK', 'AXP',
-    'BA', 'BAC', 'BIIB', 'BLK',
+    'BA', 'BABA', 'BIDU','BAC', 'BIIB', 'BLK',
     'C', 'CL', 'CLX', 'CMG', 'COIN', 'COST', 'CRM',
     'DAL', 'DG', 'DIS', 'DE', 'DLTR', 
     'EBAY', 'ED', 'EEM', 'ETSY','F', 'FDX',
@@ -197,10 +197,10 @@ train_tickers_v8 = [
     'MA', 'MCD', 'META', 'MGM', 'MS', 'MSFT', 'MSTR',
     'MRO', 'MRVL', 'MU',
     'NFLX', 'NOW', 'NVDA', 'NVO',
-    'ORCL', 'OXY', 'PANW', 'PEP',
+    'ORCL', 'OXY', 'PANW', 'PDD','PEP',
     'PG', 'PYPL', 'QCOM',
     'ROST',
-    'SBUX', 'SCHW', 'SLB','SMH',
+    'SBUX', 'SCHW', 'SLB', 'SMH', 'SNAP',
     'TEVA', 'TGT', 'TMO', 'TOL', 'TSLA',
     'UBER', 'UAL', 'UNH', 'UPS', 'V',
     'WBA', 'WFC', 'WMT', 'X', 'XHB', 'XOM'
@@ -208,6 +208,6 @@ train_tickers_v8 = [
 
 val_tickers_v8 = [
     'AMGN', 'APP', 'PANW', 'PLTR', 'LYFT', 'SHOP',
-    'CRWD', 'CAVA', 'MRNA', 'S', 'TEAM',
+    'CRWD', 'CAVA', 'IBIT', 'MRNA', 'S', 'TEAM',
     'IBKR', 'FTNT', 'NET', 'NIO', 'NU',
-    'IBIT', 'DKNG', 'SNAP', 'SOFI', 'SNOW']
+    'IBIT', 'DKNG', 'RIVN','SNAP', 'SOFI', 'SNOW']

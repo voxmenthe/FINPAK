@@ -44,8 +44,7 @@ def make_autoregressive_prediction(
     initial_sequence: torch.Tensor,
     n_steps: int,
     device: torch.device,
-    return_periods: List[int] = [1, 5],
-    sma_periods: List[int] = [20],
+    config: dict,
     use_multi_horizon: bool = False,
     horizon_weights: Optional[List[float]] = None,
     use_forcing: bool = False,
@@ -67,6 +66,8 @@ def make_autoregressive_prediction(
         forcing_halflife: Number of steps over which forcing influence reduces by half
         true_future: Optional tensor of true future values for forcing (must be at least n_steps long)
     """
+    return_periods = config['data_params']['return_periods']
+    
     model.eval()
     predictions = []
     
@@ -98,14 +99,32 @@ def make_autoregressive_prediction(
             # Create features for current sequence
             features = create_stock_features(
                 current_sequence,
-                return_periods=return_periods,
-                sma_periods=sma_periods,
-                target_periods=return_periods,
+                config=config,
                 debug=debug
             ).features
             
+            if debug:
+                print("\nDiagnostics for step", step)
+                print(f"Current sequence stats:")
+                print(f"Length: {len(current_sequence)}")
+                print(f"Last price: {current_sequence[-1].item():.4f}")
+                print(f"Last 5 prices: {current_sequence[-5:].tolist()}")
+                print(f"\nFeature stats before normalization:")
+                print(f"Shape: {features.shape}")
+                print(f"Mean: {features.mean().item():.4f}")
+                print(f"Std: {features.std().item():.4f}")
+                print(f"Min: {features.min().item():.4f}")
+                print(f"Max: {features.max().item():.4f}")
+            
             # Normalize features
             features = normalize_features(features)
+            
+            if debug:
+                print(f"\nFeature stats after normalization:")
+                print(f"Mean: {features.mean().item():.4f}")
+                print(f"Std: {features.std().item():.4f}")
+                print(f"Min: {features.min().item():.4f}")
+                print(f"Max: {features.max().item():.4f}")
             
             # Check if we have enough valid features after warmup
             if len(features) < 1:
@@ -124,6 +143,11 @@ def make_autoregressive_prediction(
             # Make prediction
             pred = model(input_sequence)
             
+            if debug:
+                print(f"\nRaw model predictions:")
+                print(f"Shape: {pred.shape}")
+                print(f"Values: {pred[0].cpu().numpy()}")
+                
             # Apply temperature-based sampling if enabled
             if use_sampling:
                 # Create a Gaussian distribution centered on predicted returns
@@ -165,11 +189,10 @@ def make_autoregressive_prediction(
                     
                     horizon_returns.append(damped_return)
                     
-                    if debug and step < 2:  # Show first few steps
-                        print(f"\nStep {step} - {period}-day horizon:")
+                    if debug:
+                        print(f"\n{period}-day return prediction:")
                         print(f"Raw {period}-day return: {period_return:.4f}")
                         print(f"Scaled daily return: {daily_return:.4f}")
-                        print(f"Dampened return: {damped_return:.4f}")
                 
                 # Combine predictions using horizon weights
                 next_return = sum(w * r for w, r in zip(horizon_weights, horizon_returns))
@@ -178,7 +201,7 @@ def make_autoregressive_prediction(
                 if abs(next_return) > stability_threshold:
                     # Clip extreme predictions while preserving direction
                     next_return = stability_threshold * (next_return / abs(next_return))
-                    if debug:
+                if debug:
                         print(f"Return exceeded threshold, clipped to: {next_return:.4f}")
                 
                 # Apply exponential moving average smoothing if enabled
@@ -191,12 +214,22 @@ def make_autoregressive_prediction(
                     print(f"\nStep {step} combined prediction:")
                     for period, ret, weight in zip(return_periods, horizon_returns, horizon_weights):
                         print(f"{period}-day contribution: {weight:.2f} * {ret:.4f} = {weight * ret:.4f}")
-                    print(f"Final weighted daily return: {next_return:.4f}")
+                    print(f"Final combined return: {next_return:.4f}")
             else:
                 next_return = pred[0][0].item()
+                if debug:
+                    print(f"\nSingle horizon prediction:")
+                    print(f"Raw return: {next_return:.4f}")
             
             # Calculate next price
             next_price = last_price * (1 + next_return)
+            
+            if debug:
+                print(f"\nPrice update:")
+                print(f"Last price: {last_price:.4f}")
+                print(f"Return: {next_return:.4f}")
+                print(f"Next price: {next_price:.4f}")
+                print(f"Price change: {(next_price - last_price):.4f} ({(next_price/last_price - 1)*100:.2f}%)")
             
             # Apply teacher forcing if enabled
             if use_forcing:
@@ -320,10 +353,8 @@ def predict_from_checkpoint(
     price_series: torch.Tensor,
     start_indices: List[int],
     n_steps: int,
+    config: dict,
     model_params: dict,
-    sequence_length: int = 47,
-    return_periods: List[int] = [1, 5],
-    sma_periods: List[int] = [20],
     device: Optional[torch.device] = None,
     use_multi_horizon: bool = False,
     horizon_weights: Optional[List[float]] = None,
@@ -344,12 +375,18 @@ def predict_from_checkpoint(
         use_forcing: Whether to use exponentially decaying teacher forcing
         forcing_halflife: Number of steps over which forcing influence reduces by half
     """
+    return_periods = config['data_params']['return_periods']
+    sma_periods = config['data_params']['sma_periods']
+    target_periods = config['data_params']['target_periods']
+    momentum_periods = config['data_params']['momentum_periods']
+    sequence_length = config['data_params']['sequence_length']
+    
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+
     if use_multi_horizon and horizon_weights is None:
         horizon_weights = [1.0 / len(return_periods)] * len(return_periods)
-    
+
     if debug:
         print(f"\nValidating start indices:")
         print(f"Price series length: {len(price_series)}")
@@ -357,45 +394,46 @@ def predict_from_checkpoint(
         print(f"Min start index: {min(start_indices)}")
         print(f"Max start index: {max(start_indices)}")
         print(f"Indices exceeding length: {[idx for idx in start_indices if idx >= len(price_series)]}")
-    
+
     # Calculate required warmup period first
     max_lookback = max([
         max(sma_periods) if sma_periods else 0,
+        max(momentum_periods) if momentum_periods else 0,
         max(return_periods),  # For return features
-        max(return_periods)   # For target calculation
+        max(target_periods)   # For target calculation
     ])
-    
+
     total_required_history = sequence_length + max_lookback
     if debug:
-        print(f"\nRequired history:")
+        print("\nRequired history:")
         print(f"Sequence length: {sequence_length}")
         print(f"Max lookback: {max_lookback}")
         print(f"Total required history: {total_required_history}")
-    
+
     # Clip indices to valid range and ensure enough history
     valid_indices = []
     skipped_early = 0  # Count indices skipped due to insufficient history
     skipped_invalid = 0  # Count indices skipped due to invalid prices
-    
+
     for idx in start_indices:
         # Clip to valid range
         idx = min(idx, len(price_series) - 1)
-        
+
         # Check if we have enough history
         if idx < total_required_history:
             skipped_early += 1
             continue
-            
+
         # Check for valid price
         if not torch.isfinite(price_series[idx]):
             skipped_invalid += 1
             continue
-            
+
         valid_indices.append(idx)
-    
+
     if not valid_indices:
         raise ValueError("No valid start indices provided")
-    
+
     if debug:
         print(f"\nIndex validation summary:")
         print(f"Total indices: {len(start_indices)}")
@@ -405,25 +443,25 @@ def predict_from_checkpoint(
             print(f"Skipped {skipped_invalid} indices with invalid prices")
         print(f"Valid indices remaining: {len(valid_indices)}")
         print(f"Valid index range: [{min(valid_indices)}, {max(valid_indices)}]")
-    
+
     # Load model
     model = load_model_from_checkpoint(
         checkpoint_path,
         model_params,
         device=device
     )
-    
+
     # Make predictions for each start index
     predictions_list = []
     for start_idx in valid_indices:
         # Get initial sequence with warmup period
         initial_sequence = price_series[max(0, start_idx - sequence_length - max_lookback):start_idx + 1]
-        
+
         # Check if we have enough data for warmup
         if len(initial_sequence) < max_lookback + 1:
             print(f"Warning: Not enough historical data for warmup at index {start_idx}")
             continue
-        
+
         # Get true future values if using forcing
         true_future = None
         if use_forcing:
@@ -432,15 +470,14 @@ def predict_from_checkpoint(
             if len(true_future) < n_steps:
                 print(f"Warning: Not enough future data for forcing at index {start_idx}")
                 continue
-        
+
         # Make prediction
         predictions = make_autoregressive_prediction(
             model=model,
             initial_sequence=initial_sequence,
             n_steps=n_steps,
             device=device,
-            return_periods=return_periods,
-            sma_periods=sma_periods,
+            config=config,
             use_multi_horizon=use_multi_horizon,
             horizon_weights=horizon_weights,
             use_forcing=use_forcing,
@@ -455,7 +492,7 @@ def predict_from_checkpoint(
             use_sampling=use_sampling
         )
         predictions_list.append(predictions)
-    
+
     # Plot results with multi-horizon parameters
     plot_predictions(
         price_series,

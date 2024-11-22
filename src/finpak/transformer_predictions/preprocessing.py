@@ -1,5 +1,5 @@
 import torch
-from typing import List
+from typing import List, Optional
 from stock_dataset import StockFeatures
 
 
@@ -19,6 +19,7 @@ def calculate_returns(prices: torch.Tensor, period: int, debug: bool = False) ->
     if debug:
         print(f"\nCalculating {period}-day returns:")
         print(f"First few prices: {prices[:5].tolist()}")
+        print(f"Last few prices: {prices[-5:].tolist()}")
         print(f"Prices shape: {prices.shape}")
 
     # Ensure prices is 2D if it's not already
@@ -29,20 +30,32 @@ def calculate_returns(prices: torch.Tensor, period: int, debug: bool = False) ->
     eps = 1e-8
     returns = (prices[period:] - prices[:-period]) / (prices[:-period] + eps)
 
+    # Debug: Print intermediate values for first few calculations
+    if debug and len(returns) > 0:
+        print(f"\nDetailed return calculations for first few points:")
+        for i in range(min(3, len(returns))):
+            end_price = prices[period + i].item()
+            start_price = prices[i].item()
+            calc_return = returns[i].item()
+            print(f"Index {i}:")
+            print(f"  Start price (t): {start_price:.4f}")
+            print(f"  End price (t+{period}): {end_price:.4f}")
+            print(f"  Return: {calc_return:.4f} ({calc_return*100:.2f}%)")
+
     # Replace infinite values with the maximum float value
     returns = torch.nan_to_num(returns, nan=0.0, posinf=3.4e38, neginf=-3.4e38)
 
     # Debug: Print some sample returns
     if debug:
-        print(f"First few {period}-day returns: {returns[:5].tolist()}")
-        print(f"Returns shape: {returns.shape}")
+        print(f"\nReturn statistics:")
         finite_returns = returns[torch.isfinite(returns)]
         if len(finite_returns) > 0:
-            print(f"Return statistics:")
             print(f"Mean: {finite_returns.mean().item():.4f}")
             print(f"Std: {finite_returns.std().item():.4f}")
             print(f"Min: {finite_returns.min().item():.4f}")
             print(f"Max: {finite_returns.max().item():.4f}")
+            print(f"First few returns: {returns[:5].tolist()}")
+            print(f"Last few returns: {returns[-5:].tolist()}")
         else:
             print("Warning: No finite returns found!")
 
@@ -53,6 +66,10 @@ def calculate_returns(prices: torch.Tensor, period: int, debug: bool = False) ->
     # If input was 1D, make output 1D
     if len(prices.shape) == 2 and prices.shape[1] == 1:
         padded_returns = padded_returns.squeeze(-1)
+        
+    if debug:
+        print(f"\nFinal padded returns shape: {padded_returns.shape}")
+        print(f"First few padded returns: {padded_returns[:period+5].tolist()}")
         
     return padded_returns
 
@@ -290,19 +307,36 @@ def combine_price_series(price_series_list: List[torch.Tensor], debug: bool = Fa
 
     return combined_series
 
-def normalize_features(features: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+def normalize_features(features: torch.Tensor, eps: float = 1e-8, debug: bool = False) -> torch.Tensor:
     """
     Normalize features using z-score normalization with safeguards for edge cases.
 
     Args:
         features: Input feature tensor
         eps: Small constant to prevent division by zero
+        debug: Whether to print debug information
 
     Returns:
         Normalized features tensor
     """
+    if debug:
+        print("\nNormalizing features:")
+        print(f"Input shape: {features.shape}")
+        print(f"Input stats:")
+        print(f"  Mean: {features.mean(dim=0)}")
+        print(f"  Std: {features.std(dim=0)}")
+        print(f"  Min: {features.min(dim=0)[0]}")
+        print(f"  Max: {features.max(dim=0)[0]}")
+        
+        # Print first few rows of input
+        print("\nFirst few input rows:")
+        for i in range(min(3, len(features))):
+            print(f"Row {i}: {features[i].tolist()}")
+
     # If we have only 1 sample, return as is
     if features.size(0) <= 1:
+        if debug:
+            print("Only 1 sample, returning as is")
         return features
 
     mean = features.mean(dim=0, keepdim=True)
@@ -314,4 +348,36 @@ def normalize_features(features: torch.Tensor, eps: float = 1e-8) -> torch.Tenso
     # Replace zero/near-zero std values with 1 to avoid division issues
     std = torch.where(std < eps, torch.ones_like(std), std)
 
-    return (features - mean) / std
+    if debug:
+        print("\nNormalization parameters:")
+        print(f"Mean: {mean.squeeze().tolist()}")
+        print(f"Std: {std.squeeze().tolist()}")
+        print(f"Features with std < eps: {(std < eps).sum().item()}")
+
+    # Normalize
+    normalized = (features - mean) / std
+
+    if debug:
+        print("\nOutput stats:")
+        print(f"  Mean: {normalized.mean(dim=0)}")
+        print(f"  Std: {normalized.std(dim=0)}")
+        print(f"  Min: {normalized.min(dim=0)[0]}")
+        print(f"  Max: {normalized.max(dim=0)[0]}")
+        
+        # Print first few rows of output
+        print("\nFirst few normalized rows:")
+        for i in range(min(3, len(normalized))):
+            print(f"Row {i}: {normalized[i].tolist()}")
+
+        # Check for any extreme values
+        extreme_mask = torch.abs(normalized) > 5
+        if extreme_mask.any():
+            print("\nWarning: Found extreme normalized values (|x| > 5):")
+            extreme_indices = torch.where(extreme_mask)
+            for i, j in zip(*extreme_indices):
+                print(f"  Position ({i},{j}): {normalized[i,j].item():.4f}")
+                print(f"    Original value: {features[i,j].item():.4f}")
+                print(f"    Mean: {mean[0,j].item():.4f}")
+                print(f"    Std: {std[0,j].item():.4f}")
+
+    return normalized
