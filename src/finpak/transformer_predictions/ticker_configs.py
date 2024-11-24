@@ -182,12 +182,12 @@ val_tickers_v7 = [
 
 
 train_tickers_v8 = [
-    'AAPL', 'AAL', 'ACN', 'AMD', 'AMZN', 'ANF', 
+    'AAPL', 'AAL', 'ACN', 'AMD', 'AMZN', 'ANF',
     'APTV', 'AVAV', 'AVGO', 'ADBE', 'ARKK', 'AXP',
-    'BA', 'BABA', 'BIDU','BAC', 'BIIB', 'BLK',
-    'C', 'CL', 'CLX', 'CMG', 'COIN', 'COST', 'CRM',
-    'DAL', 'DG', 'DIS', 'DE', 'DLTR', 
-    'EBAY', 'ED', 'EEM', 'ETSY','F', 'FDX',
+    'BA', 'BABA', 'BIDU', 'BAC', 'BIIB', 'BLK',
+    'C', 'CL', 'CLX', 'CMG', 'COIN', 'COP', 'COST', 'CRM',
+    'DAL', 'DG', 'DIS', 'DE', 'DLTR',
+    'EBAY', 'ED', 'EEM', 'ETSY', 'F', 'FDX',
     'GILD', 'GIS', 'GM', 'GD', 'GDX', 'GOOGL', 'GS',
     'H', 'HD', 'HEES', 'HON',
     'IBM', 'INTC', 'ISRG', 'IWM',
@@ -198,16 +198,18 @@ train_tickers_v8 = [
     'MRO', 'MRVL', 'MU',
     'NFLX', 'NOW', 'NVDA', 'NVO',
     'ORCL', 'OXY', 'PANW', 'PDD','PEP',
-    'PG', 'PYPL', 'QCOM',
+    'PG', 'PYPL', 'QCOM', 'QQQ',
     'ROST',
-    'SBUX', 'SCHW', 'SLB', 'SMH', 'SNAP',
-    'TEVA', 'TGT', 'TMO', 'TOL', 'TSLA',
+    'SBUX', 'SCHW', 'SLB', 'SMH', 'SNAP', 'SPY', 'SQQQ',
+    'TEAM','TEVA', 'TGT', 'TMO', 'TOL', 'TSLA',
     'UBER', 'UAL', 'UNH', 'UPS', 'V',
     'WBA', 'WFC', 'WMT', 'X', 'XHB', 'XOM'
 ]
 
 val_tickers_v8 = [
-    'AMGN', 'APP', 'PANW', 'PLTR', 'LYFT', 'SHOP',
-    'CRWD', 'CAVA', 'IBIT', 'MRNA', 'S', 'TEAM',
-    'IBKR', 'FTNT', 'NET', 'NIO', 'NU',
-    'IBIT', 'DKNG', 'RIVN','SNAP', 'SOFI', 'SNOW']
+    'AMGN', 'APP',
+    'CRWD', 'CAVA', 'DKNG', 'FTNT', 'MRNA', 'S', 'TEAM',
+    'IBIT', 'IBKR', 'ITB', 'IVV', 'LYFT', 'MARA',
+    'NET', 'NIO', 'NU',
+    'PANW', 'PLTR',  'SHOP',
+    'RIVN', 'SNAP', 'SOFI', 'SNOW']

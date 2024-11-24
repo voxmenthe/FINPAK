@@ -30,7 +30,7 @@ if __name__ == "__main__":
 
     print(f"Using device: {device}")
 
-    CONFIG = all_configs["vMP003b"]
+    CONFIG = all_configs["vMP004a"] # all_configs["vMP003b"]
     print(CONFIG)
     # Set this to a checkpoint file path to resume training or None to start from scratch
     checkpoint_path = None  # 'checkpoints/mpv005a_v2_e123_valloss_0.0020898.pt' # 'checkpoints/mpv005_v2_e81_valloss_0.0019177.pt' # None #'mpv1a_e99_valloss_0.0033764.pt' # 'mpv1a_e_77_valloss_0.0024084.pt' # 'mpv000_e245_valloss_0.0016670.pt' # None # 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  
@@ -46,7 +46,7 @@ if __name__ == "__main__":
 
     train_df_fname = 'train_df_v8.csv'
     val_df_fname = 'val_df_v8.csv'
-    FORCE_RELOAD = False
+    FORCE_RELOAD = True #False
 
     # Extract only parameters needed for data loading and model initialization
     batch_size = CONFIG['train_params']['batch_size']

@@ -87,7 +87,7 @@ def create_stock_features(
 ) -> StockFeatures:
     """
     Create feature matrix and target variables from price series
-    
+
     Returns:
         StockFeatures object containing:
         - features: Tensor of shape (n_samples, n_features)
@@ -96,10 +96,12 @@ def create_stock_features(
         - target_names: List of target names
         - valid_start_idx: Index where features become valid after initialization period
     """
-    print("\n=== Feature Creation Debug ===")
-    print(f"Input price stats: min={prices.min().item():.4f}, max={prices.max().item():.4f}")
-    print(f"NaN in prices: {torch.isnan(prices).sum().item()}")
-    
+
+    if debug:
+        print("\n=== Feature Creation Debug ===")
+        print(f"Input price stats: min={prices.min().item():.4f}, max={prices.max().item():.4f}")
+        print(f"NaN in prices: {torch.isnan(prices).sum().item()}")
+
     # Extract parameters from config
     use_volatility = config['data_params']['use_volatility']
     use_momentum = config['data_params']['use_momentum']
@@ -160,22 +162,22 @@ def create_stock_features(
             returns = calculate_returns(prices, period)
             # Use rolling window for volatility calculation
             volatility = torch.zeros_like(returns)
-            
+
             # Ensure minimum window size for std calculation
             min_window = max(5, period // 5)  # Use at least 5 points or 1/5 of period
-            
+
             for i in range(min_window, len(returns)):
                 # Use unbiased estimator and ensure minimum window size
                 window = returns[max(0, i-period):i]
                 if len(window) >= min_window:
                     volatility[i] = window.std(unbiased=True)
-            
+
             if debug:
                 print(f"\n{period}-day volatility:")
                 print(f"Shape: {volatility.shape}")
                 print(f"Stats: min={volatility.min().item():.4f}, max={volatility.max().item():.4f}")
                 print(f"NaN count: {torch.isnan(volatility).sum().item()}")
-            
+
             feature_list.append(volatility)
             feature_names.append(f'{period}d_volatility')
 
@@ -193,11 +195,11 @@ def create_stock_features(
 
     # Stack all features first, then slice
     features = torch.stack(feature_list, dim=1)  # Shape: (n_samples, n_features)
-    
+
     # Calculate target variables (future returns)
     target_list = []
     target_names = []
-    
+
     for period in target_periods:
         future_returns = calculate_returns(prices, period)
         if debug:
