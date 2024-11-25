@@ -413,21 +413,29 @@ def predict_from_checkpoint(
     use_forcing: bool = False,
     forcing_halflife: float = 3.0,
     debug: bool = False,
-    stability_threshold: float = 0.1,  # Max allowed daily return magnitude
-    dampening_factor: float = 0.95,    # Exponential dampening per step
-    use_ewma_smoothing: bool = True,   # Use exponential moving average
-    ewma_alpha: float = 0.7,          # EWMA smoothing factor
-    temperature: float = 0.01,        # Temperature for return sampling (default 0.01 = 1% std)
-    use_sampling: bool = False,        # Whether to use stochastic sampling
-    return_scaling_power: float = 1.0  # Power to use when scaling down multi-period returns
+    stability_threshold: float = 0.1,    # Max allowed daily return magnitude
+    dampening_factor: float = 0.95,      # Exponential dampening per step
+    use_ewma_smoothing: bool = True,     # Use exponential moving average
+    ewma_alpha: float = 0.7,             # EWMA smoothing factor
+    temperature: float = 0.01,           # Temperature for return sampling
+    use_sampling: bool = False,          # Whether to use stochastic sampling
+    return_scaling_power: float = 1.0,   # Power to use when scaling down multi-period returns
+    # New uncertainty parameters
+    base_uncertainty: float = 0.001,     # Base uncertainty (0.1%)
+    uncertainty_growth: float = 0.0005,  # Growth rate (0.05% per step)
+    max_uncertainty_single: float = 0.2, # Maximum bounds for single horizon (±20%)
+    max_uncertainty_multi: float = 0.5,  # Maximum bounds for multi horizon (±50%)
+    uncertainty_damping: float = 0.1     # Dampening factor for uncertainty growth
 ) -> None:
     """
     Load a model from checkpoint and make/plot predictions from multiple start points.
     
     Args:
-        start_indices: List of individual start indices for predictions
-        averaged_indices: List of lists, where each sublist contains indices to be averaged
-            If provided, start_indices will be ignored
+        base_uncertainty: Initial uncertainty level (as fraction)
+        uncertainty_growth: Rate at which uncertainty grows per step (as fraction)
+        max_uncertainty_single: Maximum uncertainty bounds for single horizon predictions
+        max_uncertainty_multi: Maximum uncertainty bounds for multi horizon predictions
+        uncertainty_damping: Factor controlling how quickly uncertainty growth slows
     """
     if averaged_indices is None and start_indices is None:
         raise ValueError("Either start_indices or averaged_indices must be provided")
@@ -528,11 +536,50 @@ def predict_from_checkpoint(
                 
             valid_indices, predictions = result
             
-            # Calculate average and bounds
+            # Calculate average prediction
             stacked_preds = torch.stack(predictions)
             avg_prediction = stacked_preds.mean(dim=0)
-            lower_bound = stacked_preds.min(dim=0)[0]
-            upper_bound = stacked_preds.max(dim=0)[0]
+            
+            # Calculate uncertainty bounds using standard deviation
+            std_dev = stacked_preds.std(dim=0)
+            
+            # Calculate time-dependent uncertainty scaling
+            timesteps = torch.arange(len(std_dev), dtype=torch.float32)
+            uncertainty_scaling = 1.0 / (1.0 + uncertainty_damping * timesteps)
+            
+            # Scale the standard deviation by prediction horizon
+            scaled_std = std_dev * uncertainty_scaling.unsqueeze(-1) if use_multi_horizon else std_dev * uncertainty_scaling
+            
+            # Use 2 standard deviations for the bounds (95% confidence interval)
+            lower_bound = avg_prediction - 2 * scaled_std
+            upper_bound = avg_prediction + 2 * scaled_std
+            
+            # Add minimal base uncertainty that grows very slowly
+            base_uncertainty_curve = base_uncertainty * (1 + uncertainty_growth * timesteps)
+            base_uncertainty_curve = base_uncertainty_curve.unsqueeze(-1) if use_multi_horizon else base_uncertainty_curve
+            
+            lower_bound = lower_bound - base_uncertainty_curve
+            upper_bound = upper_bound + base_uncertainty_curve
+            
+            # Ensure bounds don't imply negative prices
+            if use_multi_horizon:
+                lower_bound = torch.maximum(
+                    lower_bound, 
+                    torch.tensor(-max_uncertainty_multi, device=lower_bound.device, dtype=lower_bound.dtype)
+                )
+                upper_bound = torch.minimum(
+                    upper_bound, 
+                    torch.tensor(max_uncertainty_multi, device=upper_bound.device, dtype=upper_bound.dtype)
+                )
+            else:
+                lower_bound = torch.maximum(
+                    lower_bound, 
+                    torch.tensor(-max_uncertainty_single, device=lower_bound.device, dtype=lower_bound.dtype)
+                )
+                upper_bound = torch.minimum(
+                    upper_bound, 
+                    torch.tensor(max_uncertainty_single, device=upper_bound.device, dtype=upper_bound.dtype)
+                )
             
             # Store results
             final_indices.append(valid_indices[0])

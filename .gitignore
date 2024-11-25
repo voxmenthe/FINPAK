@@ -8,3 +8,4 @@ finpak/FINPAK.egg-info
 src/data/*
 **/*.pt
 **/checkpoints/*
+TRAIN_VAL_DATA
