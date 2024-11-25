@@ -272,11 +272,16 @@ def plot_predictions(
     use_multi_horizon: bool = False,
     horizon_weights: Optional[List[float]] = None,
     return_periods: List[int] = [1, 5],
-    is_averaged: bool = False
+    is_averaged: bool = False,
+    uncertainty_bounds: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None
 ) -> None:
     """
     Plot the original price series and multiple predicted future price sequences.
     If is_averaged is True, predictions_list contains averaged predictions.
+    
+    Args:
+        uncertainty_bounds: Optional list of (lower_bound, upper_bound) tensors for each prediction
+            Only used when is_averaged=True
     """
     plt.figure(figsize=(15, 8))
     
@@ -332,7 +337,7 @@ def plot_predictions(
         # Plot predicted prices
         pred_idx = range(start_idx, start_idx + len(pred_prices))
         
-        # Use different styling for averaged vs individual predictions
+        # Plot predicted prices with different styling for averaged vs individual predictions
         if is_averaged:
             plt.plot(
                 pred_idx,
@@ -341,6 +346,39 @@ def plot_predictions(
                 color='red',
                 linewidth=2.5
             )
+            
+            # Plot uncertainty bounds if provided
+            if uncertainty_bounds and i < len(uncertainty_bounds):
+                lower_bound, upper_bound = uncertainty_bounds[i]
+                
+                # Convert bounds to prices
+                lower_prices = [last_known_price]
+                upper_prices = [last_known_price]
+                
+                for lb, ub in zip(lower_bound, upper_bound):
+                    if use_multi_horizon:
+                        lb_return = (horizon_weights[0] * lb[0].item() + 
+                                   horizon_weights[1] * lb[1].item() / return_periods[1])
+                        ub_return = (horizon_weights[0] * ub[0].item() + 
+                                   horizon_weights[1] * ub[1].item() / return_periods[1])
+                    else:
+                        lb_return = lb[0].item()
+                        ub_return = ub[0].item()
+                    
+                    lower_prices.append(lower_prices[-1] * (1 + lb_return))
+                    upper_prices.append(upper_prices[-1] * (1 + ub_return))
+                
+                lower_prices = lower_prices[1:]
+                upper_prices = upper_prices[1:]
+                
+                plt.fill_between(
+                    pred_idx,
+                    lower_prices,
+                    upper_prices,
+                    color='red',
+                    alpha=0.2,
+                    label='Prediction Range' if i == 0 else None
+                )
         else:
             plt.plot(
                 pred_idx,
@@ -350,8 +388,6 @@ def plot_predictions(
                 linewidth=1.5,
                 alpha=0.5
             )
-        
-        if not is_averaged:
             plt.axvline(x=start_idx, color=colors[i], linestyle=':', alpha=0.3)
     
     plt.title('Stock Price Predictions', fontsize=14)
@@ -483,6 +519,7 @@ def predict_from_checkpoint(
         # Handle averaged predictions
         final_indices = []
         final_predictions = []
+        uncertainty_bounds = []
         
         for group in averaged_indices:
             result = validate_and_predict(group)
@@ -491,12 +528,16 @@ def predict_from_checkpoint(
                 
             valid_indices, predictions = result
             
-            # Average the predictions
-            avg_prediction = torch.stack(predictions).mean(dim=0)
+            # Calculate average and bounds
+            stacked_preds = torch.stack(predictions)
+            avg_prediction = stacked_preds.mean(dim=0)
+            lower_bound = stacked_preds.min(dim=0)[0]
+            upper_bound = stacked_preds.max(dim=0)[0]
             
-            # Use the first valid index as the reference point
+            # Store results
             final_indices.append(valid_indices[0])
             final_predictions.append(avg_prediction)
+            uncertainty_bounds.append((lower_bound, upper_bound))
         
         is_averaged = True
     else:
@@ -507,8 +548,9 @@ def predict_from_checkpoint(
             
         final_indices, final_predictions = result
         is_averaged = False
+        uncertainty_bounds = None
 
-    # Plot results with multi-horizon parameters
+    # Plot results with uncertainty bounds
     plot_predictions(
         price_series,
         final_indices,
@@ -516,5 +558,6 @@ def predict_from_checkpoint(
         use_multi_horizon=use_multi_horizon,
         horizon_weights=horizon_weights,
         return_periods=return_periods,
-        is_averaged=is_averaged
+        is_averaged=is_averaged,
+        uncertainty_bounds=uncertainty_bounds
     )
