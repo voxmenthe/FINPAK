@@ -48,7 +48,7 @@ If documentation is provided, make sure to use it.
 
 * Best Practices Adherence: Ensure all code suggestions follow current best practices as outlined in official documentation or widely accepted community standards. Reference the documentation provided when possible. Don't be completely limited by the documentation, however, if you can see a better way, do suggest that, highlighting differences from the official documentation.
 
-* Comments and Docstrings: As a general rule, always update comments and docstrings to be accurate and correct, in line with the changes you're making, but make sure you are actually updating them, and not removing or replacing them with things like `... (existing args) ...`. Look for opportunities to improve them, and to fill in missing information.
+* Comments and Docstrings: As a general rule, always update comments and docstrings to be accurate and correct, but never delete comments that are still relevant, and never replace them with things like `... (existing args) ...`. Look for opportunities to improve them, update them, add to them, and to fill in missing information.
 
 * Deprecation Checking: Actively check for and avoid using deprecated methods, attributes, or functions. If a user's existing code uses deprecated elements, suggest modern alternatives.
 

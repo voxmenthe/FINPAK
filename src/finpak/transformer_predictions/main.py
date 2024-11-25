@@ -6,6 +6,7 @@ from timeseries_decoder_v3 import TimeSeriesDecoder
 from train import train_model
 import os
 import pandas as pd
+import argparse
 from finpak.data.fetchers.yahoo import download_multiple_tickers
 from finpak.transformer_predictions.preprocessing import combine_price_series, normalize_features
 from ticker_cycler import TickerCycler
@@ -25,12 +26,19 @@ def get_device():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Train transformer model with specified config')
+    parser.add_argument('--config', type=str, required=True, help='Configuration version (e.g., vMP004a)')
+    args = parser.parse_args()
+
     # Use this device throughout your code
     device = get_device()
 
     print(f"Using device: {device}")
 
-    CONFIG = all_configs["vMP004a"] # all_configs["vMP003b"]
+    if args.config not in all_configs:
+        raise ValueError(f"Config '{args.config}' not found. Available configs: {list(all_configs.keys())}")
+    
+    CONFIG = all_configs[args.config]
     print(CONFIG)
     # Set this to a checkpoint file path to resume training or None to start from scratch
     checkpoint_path = None  # 'checkpoints/mpv005a_v2_e123_valloss_0.0020898.pt' # 'checkpoints/mpv005_v2_e81_valloss_0.0019177.pt' # None #'mpv1a_e99_valloss_0.0033764.pt' # 'mpv1a_e_77_valloss_0.0024084.pt' # 'mpv000_e245_valloss_0.0016670.pt' # None # 'checkpoints/mpv1_e_66_valloss_0.0017783.pt' # None  
@@ -46,7 +54,7 @@ if __name__ == "__main__":
 
     train_df_fname = 'train_df_v8.csv'
     val_df_fname = 'val_df_v8.csv'
-    FORCE_RELOAD = True #False
+    FORCE_RELOAD = False
 
     # Extract only parameters needed for data loading and model initialization
     batch_size = CONFIG['train_params']['batch_size']

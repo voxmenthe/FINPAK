@@ -56,7 +56,8 @@ def make_autoregressive_prediction(
     use_ewma_smoothing: bool = True,   # Use exponential moving average
     ewma_alpha: float = 0.7,          # EWMA smoothing factor
     temperature: float = 0.01,        # Temperature for return sampling (default 0.01 = 1% std)
-    use_sampling: bool = False        # Whether to use stochastic sampling
+    use_sampling: bool = False,        # Whether to use stochastic sampling
+    return_scaling_power: float = 1.0  # Power to use when scaling down multi-period returns
 ) -> torch.Tensor:
     """
     Make autoregressive predictions starting from an initial sequence.
@@ -180,7 +181,7 @@ def make_autoregressive_prediction(
                 for i, period in enumerate(return_periods):
                     # Scale down the N-day return to a daily return
                     period_return = pred[0][i].item()
-                    daily_return = (1 + period_return) ** (1/period) - 1
+                    daily_return = (1 + period_return) ** (return_scaling_power/period) - 1
                     
                     # Apply dampening based on horizon length
                     # Longer horizons get more dampening
@@ -270,10 +271,12 @@ def plot_predictions(
     window_size: int = 100,
     use_multi_horizon: bool = False,
     horizon_weights: Optional[List[float]] = None,
-    return_periods: List[int] = [1, 5]
+    return_periods: List[int] = [1, 5],
+    is_averaged: bool = False
 ) -> None:
     """
     Plot the original price series and multiple predicted future price sequences.
+    If is_averaged is True, predictions_list contains averaged predictions.
     """
     plt.figure(figsize=(15, 8))
     
@@ -312,7 +315,7 @@ def plot_predictions(
         
         for pred in predictions:
             if use_multi_horizon:
-                # Calculate the weighted return the same way as in make_autoregressive_prediction
+                # Calculate the weighted return
                 one_day_return = pred[0].item()
                 n_day_return = pred[1].item()
                 scaled_n_day = n_day_return / return_periods[1]
@@ -328,16 +331,28 @@ def plot_predictions(
         
         # Plot predicted prices
         pred_idx = range(start_idx, start_idx + len(pred_prices))
-        plt.plot(
-            pred_idx,
-            pred_prices,
-            label=f'Prediction {i} (t={start_idx})',
-            color='red', #colors[i],
-            linewidth=2,
-            # linestyle='--'
-        )
         
-        plt.axvline(x=start_idx, color=colors[i], linestyle=':', alpha=0.3)
+        # Use different styling for averaged vs individual predictions
+        if is_averaged:
+            plt.plot(
+                pred_idx,
+                pred_prices,
+                label=f'Averaged Prediction {i+1}',
+                color='red',
+                linewidth=2.5
+            )
+        else:
+            plt.plot(
+                pred_idx,
+                pred_prices,
+                label=f'Prediction {i+1} (t={start_idx})',
+                color='red',
+                linewidth=1.5,
+                alpha=0.5
+            )
+        
+        if not is_averaged:
+            plt.axvline(x=start_idx, color=colors[i], linestyle=':', alpha=0.3)
     
     plt.title('Stock Price Predictions', fontsize=14)
     plt.xlabel('Time Steps', fontsize=12)
@@ -351,10 +366,11 @@ def plot_predictions(
 def predict_from_checkpoint(
     checkpoint_path: str,
     price_series: torch.Tensor,
-    start_indices: List[int],
-    n_steps: int,
-    config: dict,
-    model_params: dict,
+    start_indices: Optional[List[int]] = None,
+    averaged_indices: Optional[List[List[int]]] = None,
+    n_steps: int = 30,
+    config: dict = None,
+    model_params: dict = None,
     device: Optional[torch.device] = None,
     use_multi_horizon: bool = False,
     horizon_weights: Optional[List[float]] = None,
@@ -366,15 +382,20 @@ def predict_from_checkpoint(
     use_ewma_smoothing: bool = True,   # Use exponential moving average
     ewma_alpha: float = 0.7,          # EWMA smoothing factor
     temperature: float = 0.01,        # Temperature for return sampling (default 0.01 = 1% std)
-    use_sampling: bool = False        # Whether to use stochastic sampling
+    use_sampling: bool = False,        # Whether to use stochastic sampling
+    return_scaling_power: float = 1.0  # Power to use when scaling down multi-period returns
 ) -> None:
     """
     Load a model from checkpoint and make/plot predictions from multiple start points.
     
     Args:
-        use_forcing: Whether to use exponentially decaying teacher forcing
-        forcing_halflife: Number of steps over which forcing influence reduces by half
+        start_indices: List of individual start indices for predictions
+        averaged_indices: List of lists, where each sublist contains indices to be averaged
+            If provided, start_indices will be ignored
     """
+    if averaged_indices is None and start_indices is None:
+        raise ValueError("Either start_indices or averaged_indices must be provided")
+        
     return_periods = config['data_params']['return_periods']
     sma_periods = config['data_params']['sma_periods']
     target_periods = config['data_params']['target_periods']
@@ -404,45 +425,6 @@ def predict_from_checkpoint(
     ])
 
     total_required_history = sequence_length + max_lookback
-    if debug:
-        print("\nRequired history:")
-        print(f"Sequence length: {sequence_length}")
-        print(f"Max lookback: {max_lookback}")
-        print(f"Total required history: {total_required_history}")
-
-    # Clip indices to valid range and ensure enough history
-    valid_indices = []
-    skipped_early = 0  # Count indices skipped due to insufficient history
-    skipped_invalid = 0  # Count indices skipped due to invalid prices
-
-    for idx in start_indices:
-        # Clip to valid range
-        idx = min(idx, len(price_series) - 1)
-
-        # Check if we have enough history
-        if idx < total_required_history:
-            skipped_early += 1
-            continue
-
-        # Check for valid price
-        if not torch.isfinite(price_series[idx]):
-            skipped_invalid += 1
-            continue
-
-        valid_indices.append(idx)
-
-    if not valid_indices:
-        raise ValueError("No valid start indices provided")
-
-    if debug:
-        print(f"\nIndex validation summary:")
-        print(f"Total indices: {len(start_indices)}")
-        if skipped_early > 0:
-            print(f"Skipped {skipped_early} early indices (need {total_required_history} points of history)")
-        if skipped_invalid > 0:
-            print(f"Skipped {skipped_invalid} indices with invalid prices")
-        print(f"Valid indices remaining: {len(valid_indices)}")
-        print(f"Valid index range: [{min(valid_indices)}, {max(valid_indices)}]")
 
     # Load model
     model = load_model_from_checkpoint(
@@ -451,54 +433,88 @@ def predict_from_checkpoint(
         device=device
     )
 
-    # Make predictions for each start index
-    predictions_list = []
-    for start_idx in valid_indices:
-        # Get initial sequence with warmup period
-        initial_sequence = price_series[max(0, start_idx - sequence_length - max_lookback):start_idx + 1]
+    def validate_and_predict(indices):
+        """Helper function to validate indices and make predictions"""
+        valid_indices = []
+        for idx in indices:
+            idx = min(idx, len(price_series) - 1)
+            if idx >= total_required_history and torch.isfinite(price_series[idx]):
+                valid_indices.append(idx)
+        
+        if not valid_indices:
+            return None
+            
+        predictions = []
+        for start_idx in valid_indices:
+            initial_sequence = price_series[max(0, start_idx - sequence_length - max_lookback):start_idx + 1]
+            
+            true_future = None
+            if use_forcing:
+                future_end = min(start_idx + n_steps, len(price_series))
+                true_future = price_series[start_idx + 1:future_end + 1]
+                if len(true_future) < n_steps:
+                    continue
 
-        # Check if we have enough data for warmup
-        if len(initial_sequence) < max_lookback + 1:
-            print(f"Warning: Not enough historical data for warmup at index {start_idx}")
-            continue
+            pred = make_autoregressive_prediction(
+                model=model,
+                initial_sequence=initial_sequence,
+                n_steps=n_steps,
+                device=device,
+                config=config,
+                use_multi_horizon=use_multi_horizon,
+                horizon_weights=horizon_weights,
+                use_forcing=use_forcing,
+                forcing_halflife=forcing_halflife,
+                true_future=true_future,
+                debug=debug,
+                stability_threshold=stability_threshold,
+                dampening_factor=dampening_factor,
+                use_ewma_smoothing=use_ewma_smoothing,
+                ewma_alpha=ewma_alpha,
+                temperature=temperature,
+                use_sampling=use_sampling,
+                return_scaling_power=return_scaling_power
+            )
+            predictions.append(pred)
+            
+        return valid_indices, predictions
 
-        # Get true future values if using forcing
-        true_future = None
-        if use_forcing:
-            future_end = min(start_idx + n_steps, len(price_series))
-            true_future = price_series[start_idx + 1:future_end + 1]
-            if len(true_future) < n_steps:
-                print(f"Warning: Not enough future data for forcing at index {start_idx}")
+    if averaged_indices is not None:
+        # Handle averaged predictions
+        final_indices = []
+        final_predictions = []
+        
+        for group in averaged_indices:
+            result = validate_and_predict(group)
+            if result is None:
                 continue
-
-        # Make prediction
-        predictions = make_autoregressive_prediction(
-            model=model,
-            initial_sequence=initial_sequence,
-            n_steps=n_steps,
-            device=device,
-            config=config,
-            use_multi_horizon=use_multi_horizon,
-            horizon_weights=horizon_weights,
-            use_forcing=use_forcing,
-            forcing_halflife=forcing_halflife,
-            true_future=true_future,
-            debug=debug,
-            stability_threshold=stability_threshold,
-            dampening_factor=dampening_factor,
-            use_ewma_smoothing=use_ewma_smoothing,
-            ewma_alpha=ewma_alpha,
-            temperature=temperature,
-            use_sampling=use_sampling
-        )
-        predictions_list.append(predictions)
+                
+            valid_indices, predictions = result
+            
+            # Average the predictions
+            avg_prediction = torch.stack(predictions).mean(dim=0)
+            
+            # Use the first valid index as the reference point
+            final_indices.append(valid_indices[0])
+            final_predictions.append(avg_prediction)
+        
+        is_averaged = True
+    else:
+        # Handle individual predictions
+        result = validate_and_predict(start_indices)
+        if result is None:
+            raise ValueError("No valid predictions could be made")
+            
+        final_indices, final_predictions = result
+        is_averaged = False
 
     # Plot results with multi-horizon parameters
     plot_predictions(
         price_series,
-        valid_indices,
-        predictions_list,
+        final_indices,
+        final_predictions,
         use_multi_horizon=use_multi_horizon,
         horizon_weights=horizon_weights,
-        return_periods=return_periods
+        return_periods=return_periods,
+        is_averaged=is_averaged
     )
