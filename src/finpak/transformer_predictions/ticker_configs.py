@@ -213,3 +213,85 @@ val_tickers_v8 = [
     'NET', 'NIO', 'NU',
     'PANW', 'PLTR',  'SHOP',
     'RIVN', 'SNAP', 'SOFI', 'SNOW']
+
+
+train_tickers_v9 = [
+    'A', 'AAPL', 'AAL', 'ABBV', 'ABNB', 'ACN',
+    'ADSK', 'AFRM', 'AMAT', 'AMD', 'AMGN','AMZN', 'ANF',
+    'APTV', 'AVAV', 'AVGO', 'ADBE', 'ARKK', 'AXP',
+    'BA', 'BABA', 'BBY', 'BIIB', 'BIDU', 'BAC', 'BIIB', 'BLK', 
+    'BRK-B', 'BX',
+    'C', 'CL', 'CLX', 'CMG', 'COIN', 'COP', 'COST',
+    'CRM', 'CROX', 'CVX', 'CZR',
+    'DAL', 'DG', 'DIS', 'DE', 'DHR', 'DLTR',
+    'EBAY', 'ED', 'EEM', 'EFA', 'ETSY', 'F', 'FDX',
+    'GILD', 'GIS', 'GM', 'GD', 'GDX', 'GOOGL', 'GS',
+    'H', 'HD', 'HEES', 'HON', 'HPQ',
+    'IBM', 'INTC', 'ISRG', 'IWM',
+    'JNJ', 'JPM', 'KRE', 'KO',
+    'LEN', 'LLY', 'LMT', 'LULU', 'LUV', 'LVS',
+    'MA', 'MCD', 'META', 'MGM', 'MRVL','MS', 'MSFT', 'MSTR',
+    'MRO', 'MRVL', 'MU',
+    'NFLX', 'NOW', 'NVDA', 'NVO',
+    'ORCL', 'OXY', 'PANW', 'PDD','PEP',
+    'PG', 'PYPL', 'QCOM', 'QQQ',
+    'RIOT', 'ROKU','ROST',
+    'SBUX', 'SCHW', 'SLB', 'SMCI', 'SMH',
+    'SMTC', 'SNAP', 'SOXX','SPY', 'SQQQ',
+    'T', 'TEAM', 'TEVA', 'TGT', 'TMO', 'TOL', 'TSLA', 'TSM',
+    'UBER', 'UAL', 'UNH', 'UPS', 'V', 'VZ',
+    'WBA', 'WDAY', 'WFC', 'WMT', 'WYNN',
+    'X', 'XHB', 'XLF', 'XOM', 'ZM'
+]
+
+val_tickers_v9 = [
+    'APP', 'ARM',
+    'CRWD', 'CAVA', 'CLSK', 'DIA', 'DKNG', 
+    'FTNT', 'FXI', 'HIMS', 
+    'IBIT', 'IBKR', 'ITB', 'IVV', 
+    'LYFT', 'MARA', 'MRNA', 
+    'NET', 'NIO', 'NU',
+    'PANW', 'PLTR', 'RDDT', 'RIVN',
+    'S', 'SHOP', 'SOFI', 'SNOW', 'TEAM']
+
+
+train_tickers_v10 = [
+    'A', 'AAPL', 'AAL', 'ABBV', 'ABNB', 'ACN', 'ADI', 'ADP',
+    'ADSK', 'AFRM', 'AMAT', 'AMD', 'AMGN', 'AMZN', 'ANF', 'ANSS',
+    'APTV', 'AVAV', 'AVGO', 'ADBE', 'ARKK', 'AXP',
+    'BA', 'BABA', 'BBY', 'BIIB', 'BIDU', 'BAC', 'BIIB', 'BLK',
+    'BRK-B', 'BX',
+    'C', 'CDNS', 'CL', 'CLX', 'CMG', 'COIN', 'COP', 'COST',
+    'CRM', 'CROX', 'CVX', 'CZR',
+    'DAL', 'DG', 'DIS', 'DE', 'DHR', 'DLTR',
+    'EA', 'EBAY', 'ED', 'EEM', 'EFA', 'ETSY', 'F', 'FAST', 'FDX',
+    'GILD', 'GIS', 'GM', 'GD', 'GDX', 'GOOGL', 'GS',
+    'H', 'HD', 'HEES', 'HON', 'HPQ',
+    'IBM', 'INTC', 'ISRG', 'IWM',
+    'JNJ', 'JPM', 'KRE', 'KLAC', 'KO',
+    'LEN', 'LIN', 'LLY', 'LMT', 'LULU', 'LUV', 'LVS',
+    'MA', 'MCD', 'MELI', 'META', 'MGM', 'MRVL', 'MS', 'MSFT', 'MSTR',
+    'MRO', 'MRVL', 'MU',
+    'NFLX', 'NOW', 'NVDA', 'NVO',
+    'ON','ORCL', 'OXY', 'PANW', 'PDD', 'PEP',
+    'PG', 'PYPL', 'QCOM', 'QQQ',
+    'REGN', 'RIOT', 'ROKU',  'ROP', 'ROST',
+    'SBUX', 'SCHW', 'SLB', 'SMCI', 'SMH',
+    'SMTC', 'SNAP', 'SOXX', 'SPY', 'SQQQ',
+    'T', 'TEAM', 'TEVA', 'TGT', 'TMO', 'TOL', 'TSLA', 'TSM', 'TTD',
+    'UBER', 'UAL', 'UNH', 'UPS', 'V', 'VRTX', 'VZ',
+    'WBA', 'WDAY', 'WFC', 'WMT', 'WYNN',
+    'X', 'XHB', 'XLF', 'XOM', 'ZM'
+]
+
+val_tickers_v10 = [
+    'APP', 'ARM',
+    'CEG', 'CRWD', 'CAVA', 'CHTR', 'CLSK',
+    'DDOG', 'DIA', 'DKNG',
+    'FTNT', 'FXI', 'HIMS',
+    'IBIT', 'IBKR', 'ITB', 'IVV', 'KDP',
+    'LYFT', 'MARA', 'MDLZ', 'MNST', 'MRNA',
+    'NET', 'NIO', 'NU',
+    'PANW', 'PLTR', 'RDDT', 'RIVN',
+    'S', 'SHOP', 'SOFI', 'SNOW', 'TEAM'
+]

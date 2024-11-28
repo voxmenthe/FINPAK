@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 from torch.utils.data import DataLoader
 import os
 from heapq import heappush, heappushpop
@@ -14,7 +14,35 @@ from data_loading import create_subset_dataloaders
 import pandas as pd
 import signal
 import sys
+from dataclasses import dataclass
+from torch.serialization import add_safe_globals
+from optimizers import CAdamW
+import time
+import shutil
+from pathlib import Path
+import tempfile
+import glob
 
+OPTIMIZER = CAdamW # torch.optim.AdamW
+
+@dataclass
+class TrainingMetadata:
+    epoch: int
+    val_loss: float
+    train_loss: float
+    train_cycle: int
+    val_cycle: int
+    config: Dict[str, Any]
+    model_params: Dict[str, int]
+    training_history: Dict[str, List[float]]
+    timestamp: str
+    trained_subsets: List[List[str]]
+
+# Register our metadata class as safe for serialization
+add_safe_globals({
+    'TrainingMetadata': TrainingMetadata,
+    'pd.Timestamp': pd.Timestamp
+})
 
 def seed_everything(seed: int) -> None:
     """
@@ -45,7 +73,8 @@ def train_model(
     train_cycler: Optional[TickerCycler] = None,
     train_df: Optional[pd.DataFrame] = None,
     val_df: Optional[pd.DataFrame] = None,
-    debug: bool = False
+    debug: bool = False,
+    trained_subsets: Optional[List[List[str]]] = None
 ) -> Tuple[List[float], List[float]]:
     """
     Train the model using parameters from config
@@ -63,9 +92,13 @@ def train_model(
         train_df: DataFrame containing training data
         val_df: DataFrame containing validation data
         debug: Whether to print debug information
+        trained_subsets: Optional list of previously trained subsets
     """
     if config is None:
         raise ValueError("Config must be provided")
+
+    if trained_subsets is None:
+        trained_subsets = []
 
     # Set random seed if provided
     if 'seed' in config['train_params']:
@@ -110,7 +143,11 @@ def train_model(
     
     # Initialize heap for keeping track of best models (max heap using negative loss)
     best_models = []
-
+    
+    # Keep track of checkpoints and validation losses for current training subset
+    current_subset_checkpoints = []  # List of (val_loss, epoch, checkpoint_name, epochs_in_subset)
+    current_subset_start_epoch = 0
+    
     model = model.to(device)
     
     def get_scheduler(optimizer, config, steps_per_epoch):
@@ -180,7 +217,7 @@ def train_model(
         return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     # Initialize optimizer and scheduler
-    optimizer = torch.optim.AdamW(
+    optimizer = OPTIMIZER(
         model.parameters(),
         lr=config['train_params']['scheduler']['base_lr'],
         betas=(0.9, 0.95),
@@ -205,6 +242,119 @@ def train_model(
     # Register the signal handler
     signal.signal(signal.SIGINT, signal_handler)
     
+    def safe_torch_save(checkpoint, save_path, max_retries=3):
+        """Safely save PyTorch checkpoint with retries and temporary file."""
+        save_dir = os.path.dirname(save_path)
+        
+        # Check available disk space (need roughly 2x the checkpoint size for safe saving)
+        checkpoint_size = sum(param.numel() * param.element_size() 
+                             for param in checkpoint['model_state_dict'].values())
+        free_space = shutil.disk_usage(save_dir).free
+        
+        if free_space < checkpoint_size * 3:  # 3x safety factor
+            raise RuntimeError(f"Insufficient disk space. Need {checkpoint_size*3} bytes, have {free_space}")
+        
+        # Create temporary file
+        temp_save_path = None
+        for attempt in range(max_retries):
+            try:
+                # Save to temporary file first
+                with tempfile.NamedTemporaryFile(delete=False, dir=save_dir) as tmp_file:
+                    temp_save_path = tmp_file.name
+                    torch.save(checkpoint, temp_save_path)
+                
+                # If save was successful, move the temp file to the final location
+                shutil.move(temp_save_path, save_path)
+                return True
+                
+            except (RuntimeError, OSError) as e:
+                print(f"Save attempt {attempt + 1} failed: {str(e)}")
+                if temp_save_path and os.path.exists(temp_save_path):
+                    try:
+                        os.remove(temp_save_path)
+                    except OSError:
+                        pass
+                
+                if attempt == max_retries - 1:
+                    print(f"Failed to save checkpoint after {max_retries} attempts")
+                    raise
+                
+                # Wait before retry (exponential backoff)
+                time.sleep(2 ** attempt)
+        
+        return False
+
+    def manage_checkpoints(checkpoint_dir: str, current_subset_checkpoints: List[Tuple[float, int, str, int]], 
+                          best_models: List[Tuple[float, int, Tuple[int, int]]], max_checkpoints: int,
+                          min_epochs_per_subset: int = 2, current_cycle: int = 0) -> None:
+        """Manage checkpoints when transitioning between subsets.
+        
+        Args:
+            checkpoint_dir: Directory containing checkpoints
+            current_subset_checkpoints: List of (val_loss, epoch, checkpoint_name, epochs_in_subset)
+            best_models: Global list of best models (val_loss, epoch, cycle)
+            max_checkpoints: Maximum number of checkpoints to keep globally
+            min_epochs_per_subset: Minimum number of epochs a model should train on a subset
+            current_cycle: Current training cycle number (increments each time we cycle through all subsets)
+        """
+        if not current_subset_checkpoints:
+            return
+        
+        # Find the best checkpoint that has trained for at least min_epochs_per_subset
+        qualified_checkpoints = [(loss, epoch, name, epochs) for loss, epoch, name, epochs 
+                               in current_subset_checkpoints if epochs >= min_epochs_per_subset]
+        
+        if qualified_checkpoints:
+            # Keep only the best qualified checkpoint from this cycle
+            best_checkpoint = min(qualified_checkpoints, key=lambda x: x[0])
+            keep_file = best_checkpoint[2]
+            
+            # Get all checkpoints for the current subset (based on subset identifier in filename)
+            subset_identifier = keep_file.split('_')[1]  # Assuming format like "checkpoint_subset1_epoch10.pt"
+            all_subset_checkpoints = []
+            for f in glob.glob(os.path.join(checkpoint_dir, f"*_{subset_identifier}_*.pt")):
+                try:
+                    # Extract cycle number from metadata in checkpoint
+                    checkpoint = torch.load(f, map_location='cpu')
+                    checkpoint_cycle = checkpoint['metadata'].train_cycle
+                    all_subset_checkpoints.append((f, checkpoint_cycle))
+                except Exception as e:
+                    print(f"Error reading checkpoint {f}: {e}")
+                    continue
+            
+            # Keep only the checkpoint from the current cycle
+            for checkpoint_path, cycle_num in all_subset_checkpoints:
+                checkpoint_name = os.path.basename(checkpoint_path)
+                if checkpoint_name != keep_file:  # Don't delete our current best checkpoint
+                    try:
+                        os.remove(checkpoint_path)
+                        print(f"Deleted old checkpoint from cycle {cycle_num}: {checkpoint_name}")
+                    except OSError as e:
+                        print(f"Error deleting checkpoint {checkpoint_name}: {e}")
+        
+        # Ensure we don't exceed max_checkpoints globally
+        # Only consider checkpoints with the same prefix (from current config)
+        prefix = keep_file.split('_')[0]  # Extract prefix from current checkpoint name
+        all_checkpoints = glob.glob(os.path.join(checkpoint_dir, f"{prefix}_*.pt"))
+        if len(all_checkpoints) > max_checkpoints:
+            # Sort checkpoints by modification time (oldest first)
+            checkpoints_with_time = [(f, os.path.getmtime(f)) for f in all_checkpoints]
+            checkpoints_with_time.sort(key=lambda x: x[1])
+            
+            # Delete oldest checkpoints until we're at max_checkpoints
+            for checkpoint_path, _ in checkpoints_with_time[:-max_checkpoints]:
+                try:
+                    os.remove(checkpoint_path)
+                    print(f"Deleted old checkpoint: {os.path.basename(checkpoint_path)}")
+                except OSError as e:
+                    print(f"Error deleting old checkpoint {checkpoint_path}: {e}")
+
+    # Initialize tracking variables
+    current_subset_checkpoints = []
+    current_subset_start_epoch = 0
+    best_models = []  # heap of (negative val_loss, epoch, cycle) tuples
+    train_cycle = 0  # Track how many times we've cycled through all subsets
+    
     for epoch in range(start_epoch, n_epochs):
         # Training
         model.train()
@@ -213,15 +363,31 @@ def train_model(
         for batch_x, batch_y in train_loader:
             if interrupted:
                 print("Saving final checkpoint before exit...")
+                metadata = TrainingMetadata(
+                    epoch=epoch,
+                    val_loss=val_losses[-1] if val_losses else float('inf'),
+                    train_loss=train_losses[-1] if train_losses else float('inf'),
+                    train_cycle=train_cycler.current_subset_idx if train_cycler else 0,
+                    val_cycle=validation_cycler.current_subset_idx if validation_cycler else 0,
+                    config=config,
+                    model_params={
+                        'total_params': sum(p.numel() for p in model.parameters()),
+                        'trainable_params': sum(p.numel() for p in model.parameters() if p.requires_grad),
+                    },
+                    training_history={
+                        'train_losses': train_losses,
+                        'val_losses': val_losses,
+                    },
+                    timestamp=pd.Timestamp.now().isoformat(),
+                    trained_subsets=trained_subsets + [train_cycler.get_current_subset()] if train_cycler else []
+                )
+                
                 checkpoint = {
-                    'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
-                    'val_loss': val_losses[-1] if val_losses else float('inf'),
-                    'train_loss': train_losses[-1] if train_losses else float('inf'),
-                    'train_cycle': train_cycler.current_subset_idx if train_cycler else 0,
-                    'val_cycle': validation_cycler.current_subset_idx if validation_cycler else 0
+                    'metadata': metadata
                 }
+                
                 final_checkpoint_name = f"{config['train_params']['prefix']}_id_{config['train_params']['run_id']}_INTERRUPTED_e{epoch}.pt"
                 torch.save(checkpoint, os.path.join(checkpoint_dir, final_checkpoint_name))
                 print(f"Saved interrupt checkpoint: {final_checkpoint_name}")
@@ -291,19 +457,38 @@ def train_model(
         should_continue = True
         
         # Save checkpoint if it's among the best
+        metadata = TrainingMetadata(
+            epoch=epoch,
+            val_loss=current_val_loss,
+            train_loss=train_losses[-1],
+            train_cycle=train_cycler.current_subset_idx if train_cycler else 0,
+            val_cycle=validation_cycler.current_subset_idx if validation_cycler else 0,
+            config=config,
+            model_params={
+                'total_params': sum(p.numel() for p in model.parameters()),
+                'trainable_params': sum(p.numel() for p in model.parameters() if p.requires_grad),
+            },
+            training_history={
+                'train_losses': train_losses,
+                'val_losses': val_losses,
+            },
+            timestamp=pd.Timestamp.now().isoformat(),
+            trained_subsets=trained_subsets + [train_cycler.get_current_subset()] if train_cycler else []
+        )
+        
         checkpoint = {
-            'epoch': epoch,
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
-            'val_loss': current_val_loss,
-            'train_loss': train_losses[-1],
-            'train_cycle': train_cycler.current_subset_idx if train_cycler else 0,
-            'val_cycle': validation_cycler.current_subset_idx if validation_cycler else 0
+            'metadata': metadata
         }
         
         # Generate checkpoint name with cycle information
         cycle_info = f"_tc{train_cycler.current_subset_idx if train_cycler else 0}_vc{validation_cycler.current_subset_idx if validation_cycler else 0}"
         checkpoint_name = f"{config['train_params']['prefix']}_id_{config['train_params']['run_id']}_arc_{config['train_params']['architecture_version']}{cycle_info}_e{epoch}_valloss_{current_val_loss:.7f}.pt"
+        
+        # Track checkpoint for current subset
+        epochs_in_subset = epoch - current_subset_start_epoch + 1
+        current_subset_checkpoints.append((current_val_loss, epoch, checkpoint_name, epochs_in_subset))
         
         # Always save the first checkpoint of each cycle
         current_cycle = (train_cycler.current_subset_idx if train_cycler else 0, validation_cycler.current_subset_idx if validation_cycler else 0)
@@ -312,52 +497,26 @@ def train_model(
         # Handle model checkpointing
         if len(best_models) < train_params['max_checkpoints'] or is_first_checkpoint_in_cycle:
             heappush(best_models, (-current_val_loss, epoch, current_cycle))
-            torch.save(checkpoint, os.path.join(checkpoint_dir, checkpoint_name))
-            print(f"Saved chkpt cycle# {current_cycle}  {checkpoint_name}")
+            save_path = os.path.join(checkpoint_dir, checkpoint_name)
+            if safe_torch_save(checkpoint, save_path):
+                print(f"Saved chkpt cycle# {current_cycle}  {checkpoint_name}")
         else:
             # If current model is better than worst of our best models
             if -current_val_loss > best_models[0][0]:
-                # Check if we can remove a checkpoint from the same cycle
-                same_cycle_checkpoints = [(i, (loss, ep, cyc)) for i, (loss, ep, cyc) in enumerate(best_models) if cyc == current_cycle]
-                
-                if same_cycle_checkpoints:
-                    # Remove the worst checkpoint from the same cycle
-                    worst_idx, (worst_loss, worst_epoch, worst_cycle) = min(same_cycle_checkpoints, key=lambda x: x[1][0])
-                    best_models.pop(worst_idx)
-                else:
-                    # Remove the overall worst checkpoint that's not the only one from its cycle
-                    cycle_counts = {}
-                    for _, _, cyc in best_models:
-                        cycle_counts[cyc] = cycle_counts.get(cyc, 0) + 1
-                    
-                    # Find the worst checkpoint that's not the only one from its cycle
-                    for i, (loss, ep, cyc) in enumerate(best_models):
-                        if cycle_counts[cyc] > 1:
-                            worst_idx = i
-                            worst_loss, worst_epoch, worst_cycle = loss, ep, cyc
-                            break
-                    else:
-                        # If we can't find a checkpoint to remove, don't save the new one
-                        return
-                    
-                    best_models.pop(worst_idx)
-                
-                # Find and remove the old checkpoint file
-                old_cycle_info = f"_tc{worst_cycle[0]}_vc{worst_cycle[1]}"
-                for filename in os.listdir(checkpoint_dir):
-                    if filename.startswith('.'):  # Skip hidden files
-                        continue
-                    if (f"{config['train_params']['prefix']}_id_{config['train_params']['run_id']}_arc_"
-                        f"{config['train_params']['architecture_version']}{old_cycle_info}_e{worst_epoch}_" in filename):
-                        try:
-                            os.remove(os.path.join(checkpoint_dir, filename))
-                        except FileNotFoundError:
-                            print(f"Warning: Could not delete checkpoint file {filename}")
-                
-                # Save the new checkpoint
                 heappush(best_models, (-current_val_loss, epoch, current_cycle))
-                torch.save(checkpoint, os.path.join(checkpoint_dir, checkpoint_name))
-                print(f"Saved chkpt cycle# {current_cycle}  {checkpoint_name}")
+                save_path = os.path.join(checkpoint_dir, checkpoint_name)
+                if safe_torch_save(checkpoint, save_path):
+                    print(f"Saved chkpt cycle# {current_cycle}  {checkpoint_name}")
+                    
+        # Manage checkpoints when switching to a new subset
+        if train_cycler and not train_cycler.has_more_subsets():
+            manage_checkpoints(checkpoint_dir, current_subset_checkpoints, best_models, 
+                             train_params['max_checkpoints'], current_cycle=train_cycle)
+            current_subset_checkpoints = []
+            current_subset_start_epoch = epoch + 1
+            
+            # Increment cycle counter when we've gone through all subsets
+            train_cycle += 1
         
         # Check early stopping
         if early_stop(current_val_loss):
@@ -366,6 +525,41 @@ def train_model(
             
             if enable_train_cycling:
                 if train_cycler.has_more_subsets():
+                    # Find best checkpoint from current subset with at least 2 epochs of training
+                    valid_checkpoints = [(loss, ep, name) for loss, ep, name, epochs in current_subset_checkpoints if epochs >= 2]
+                    
+                    if valid_checkpoints:
+                        # Get the checkpoint with the lowest validation loss
+                        best_loss, best_epoch, best_checkpoint_name = min(valid_checkpoints, key=lambda x: x[0])
+                        print(f"\nRewinding to best checkpoint from current subset:")
+                        print(f"Epoch: {best_epoch}, Val Loss: {best_loss:.7f}")
+                        
+                        # Load the best checkpoint
+                        checkpoint = torch.load(os.path.join(checkpoint_dir, best_checkpoint_name))
+                        model.load_state_dict(checkpoint['model_state_dict'])
+                        
+                        # Important: Move model back to device after loading checkpoint
+                        model = model.to(device)
+                        
+                        # Reinitialize optimizer with loaded model parameters
+                        optimizer = torch.optim.AdamW(
+                            model.parameters(),
+                            lr=config['train_params']['scheduler']['base_lr'],
+                            betas=(0.9, 0.95),
+                            weight_decay=weight_decay
+                        )
+                        
+                        # Reinitialize scheduler with new optimizer
+                        scheduler = get_scheduler(optimizer, config, len(train_loader))
+                        
+                        if debug:
+                            print("Model successfully loaded and moved to device")
+                            print(f"Model device: {next(model.parameters()).device}")
+                    
+                    # Reset checkpoint tracking for new subset
+                    current_subset_checkpoints = []
+                    current_subset_start_epoch = epoch + 1
+                    
                     # Move to next training subset and update validation subset
                     print(f"\nSwitching to next training subset after epoch {epoch}")
                     train_cycler.next_subset()
@@ -377,6 +571,14 @@ def train_model(
                             validation_cycler.reset()
                             val_cycle_completed = True
                         validation_cycler.next_subset()
+                    
+                    # Print current subset information
+                    current_train_subset = train_cycler.get_current_subset()
+                    print(f"\nSubset {train_cycler.current_subset_idx + 1}/{len(train_cycler.subsets)}")
+                    print(f"Train tickers: {', '.join(current_train_subset)}")
+                    if enable_validation_cycling:
+                        current_val_subset = validation_cycler.get_current_subset()
+                        print(f"Validation tickers: {', '.join(current_val_subset)}")
                     
                     # Create new dataloaders with updated subsets
                     train_loader, val_loader = create_subset_dataloaders(
@@ -395,6 +597,12 @@ def train_model(
                     if debug:
                         status = early_stop.get_improvement_status()
                         print(f"Starting new cycle. Best loss: {status['current_best_loss']:.7f}, Global best: {status['global_best_loss']:.7f}")
+                        
+                        # Add debug prints for model state
+                        print("\nModel state after loading checkpoint:")
+                        print(f"Model device: {next(model.parameters()).device}")
+                        print(f"Optimizer state: {len(optimizer.state_dict()['state'])} parameter groups")
+                        print(f"Learning rate: {scheduler.get_last_lr()[0]:.2e}")
                 
                 elif enable_validation_cycling and not val_cycle_completed:
                     # Train cycler is exhausted but validation hasn't completed a full cycle
@@ -408,6 +616,13 @@ def train_model(
                         validation_cycler.reset()
                         val_cycle_completed = True
                     validation_cycler.next_subset()
+                    
+                    # Print current subset information
+                    current_train_subset = train_cycler.get_current_subset()
+                    print(f"\nSubset {train_cycler.current_subset_idx + 1}/{len(train_cycler.subsets)}")
+                    print(f"Train tickers: {', '.join(current_train_subset)}")
+                    current_val_subset = validation_cycler.get_current_subset()
+                    print(f"Validation tickers: {', '.join(current_val_subset)}")
                     
                     # Create new dataloaders with updated subsets
                     train_loader, val_loader = create_subset_dataloaders(
@@ -433,6 +648,13 @@ def train_model(
                 # Only cycle validation if train cycling is not enabled
                 print(f"\nSwitching to next validation subset after epoch {epoch}")
                 validation_cycler.next_subset()
+                
+                # Print current subset information
+                if train_cycler:
+                    current_train_subset = train_cycler.get_current_subset()
+                    print(f"Train tickers: {', '.join(current_train_subset)}")
+                current_val_subset = validation_cycler.get_current_subset()
+                print(f"Validation tickers: {', '.join(current_val_subset)}")
                 
                 # Start new cycle and check if we should stop globally
                 if early_stop.start_new_cycle():
@@ -460,6 +682,30 @@ def train_model(
         if not should_continue:
             print(f"\nEarly stopping triggered after epoch {epoch}")
             # Save final checkpoint
+            metadata = TrainingMetadata(
+                epoch=epoch,
+                val_loss=current_val_loss,
+                train_loss=train_losses[-1],
+                train_cycle=train_cycler.current_subset_idx if train_cycler else 0,
+                val_cycle=validation_cycler.current_subset_idx if validation_cycler else 0,
+                config=config,
+                model_params={
+                    'total_params': sum(p.numel() for p in model.parameters()),
+                    'trainable_params': sum(p.numel() for p in model.parameters() if p.requires_grad),
+                },
+                training_history={
+                    'train_losses': train_losses,
+                    'val_losses': val_losses,
+                },
+                timestamp=pd.Timestamp.now().isoformat(),
+                trained_subsets=trained_subsets + [train_cycler.get_current_subset()] if train_cycler else []
+            )
+            
+            checkpoint = {
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'metadata': metadata
+            }
             final_checkpoint_name = f"{config['train_params']['prefix']}_final_id_{config['train_params']['run_id']}_arc_{config['train_params']['architecture_version']}_e{epoch}_valloss_{current_val_loss:.7f}.pt"
             torch.save(checkpoint, os.path.join(checkpoint_dir, final_checkpoint_name))
             print(f"Saved final chkpt: {final_checkpoint_name}")

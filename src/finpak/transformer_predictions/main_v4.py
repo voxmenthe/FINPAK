@@ -1,8 +1,6 @@
 import re, os, torch, argparse
 from data_loading import create_dataloaders
-#from timeseries_decoder import TimeSeriesDecoder
-#from timeseries_decoder_v2 import TimeSeriesDecoder
-from timeseries_decoder_v3 import TimeSeriesDecoder
+from timeseries_decoder_v4 import TimeSeriesDecoder
 from train import train_model
 import pandas as pd
 from finpak.data.fetchers.yahoo import download_multiple_tickers
@@ -100,8 +98,8 @@ if __name__ == "__main__":
         val_df.index = pd.to_datetime(val_df.index)
         
         # Forward fill any missing values within each ticker's series
-        train_df = train_df.ffill() # fillna(method='ffill')
-        val_df = val_df.ffill() # fillna(method='ffill')
+        train_df = train_df.ffill()
+        val_df = val_df.ffill()
         
         # Drop any remaining NaN values
         train_df = train_df.dropna(axis=0, how='any')
