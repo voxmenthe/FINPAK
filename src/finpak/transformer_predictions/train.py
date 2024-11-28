@@ -331,23 +331,23 @@ def train_model(
                         print(f"Deleted old checkpoint from cycle {cycle_num}: {checkpoint_name}")
                     except OSError as e:
                         print(f"Error deleting checkpoint {checkpoint_name}: {e}")
-        
-        # Ensure we don't exceed max_checkpoints globally
-        # Only consider checkpoints with the same prefix (from current config)
-        prefix = keep_file.split('_')[0]  # Extract prefix from current checkpoint name
-        all_checkpoints = glob.glob(os.path.join(checkpoint_dir, f"{prefix}_*.pt"))
-        if len(all_checkpoints) > max_checkpoints:
-            # Sort checkpoints by modification time (oldest first)
-            checkpoints_with_time = [(f, os.path.getmtime(f)) for f in all_checkpoints]
-            checkpoints_with_time.sort(key=lambda x: x[1])
             
-            # Delete oldest checkpoints until we're at max_checkpoints
-            for checkpoint_path, _ in checkpoints_with_time[:-max_checkpoints]:
-                try:
-                    os.remove(checkpoint_path)
-                    print(f"Deleted old checkpoint: {os.path.basename(checkpoint_path)}")
-                except OSError as e:
-                    print(f"Error deleting old checkpoint {checkpoint_path}: {e}")
+            # Ensure we don't exceed max_checkpoints globally
+            # Only consider checkpoints with the same prefix (from current config)
+            prefix = keep_file.split('_')[0]  # Extract prefix from current checkpoint name
+            all_checkpoints = glob.glob(os.path.join(checkpoint_dir, f"{prefix}_*.pt"))
+            if len(all_checkpoints) > max_checkpoints:
+                # Sort checkpoints by modification time (oldest first)
+                checkpoints_with_time = [(f, os.path.getmtime(f)) for f in all_checkpoints]
+                checkpoints_with_time.sort(key=lambda x: x[1])
+                
+                # Delete oldest checkpoints until we're at max_checkpoints
+                for checkpoint_path, _ in checkpoints_with_time[:-max_checkpoints]:
+                    try:
+                        os.remove(checkpoint_path)
+                        print(f"Deleted old checkpoint: {os.path.basename(checkpoint_path)}")
+                    except OSError as e:
+                        print(f"Error deleting old checkpoint {checkpoint_path}: {e}")
 
     # Initialize tracking variables
     current_subset_checkpoints = []

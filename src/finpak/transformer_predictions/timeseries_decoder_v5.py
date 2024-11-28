@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from typing import List
+from typing import List, Optional
 import math
 
 
@@ -342,10 +342,74 @@ class DecoderBlock(nn.Module):
         x = x + self.dropout(self.mlp(self.ln2(x)))
         return x
 
+class HybridInputEmbedding(nn.Module):
+    """
+    Combines continuous and categorical features into a single embedding
+    
+    Args:
+        d_continuous: Number of continuous features
+        n_categorical: Number of categorical features
+        n_bins: Number of bins for each categorical feature
+        d_model: Model dimension
+        dropout: Dropout rate
+    """
+    def __init__(self, d_continuous: int, n_categorical: int, n_bins: int, d_model: int, dropout: float = 0.1):
+        super().__init__()
+        assert d_model % 2 == 0, "d_model must be even"
+        
+        # Split d_model between continuous and categorical features
+        self.d_continuous_proj = (d_model // 2) if n_categorical > 0 else d_model
+        self.d_categorical_proj = d_model - self.d_continuous_proj
+        
+        # Projections for continuous features
+        self.continuous_projection = nn.Linear(d_continuous, self.d_continuous_proj)
+        
+        # Embeddings for categorical features
+        if n_categorical > 0:
+            self.categorical_embeddings = nn.ModuleList([
+                nn.Embedding(n_bins, self.d_categorical_proj // n_categorical)
+                for _ in range(n_categorical)
+            ])
+        else:
+            self.categorical_embeddings = None
+        
+        # Final projection to combine features
+        self.combine_projection = nn.Linear(d_model, d_model)
+        self.dropout = nn.Dropout(dropout)
+        self.layer_norm = nn.LayerNorm(d_model)
+    
+    def forward(self, continuous_features: torch.Tensor, categorical_features: Optional[torch.Tensor] = None) -> torch.Tensor:
+        # Project continuous features
+        x_continuous = self.continuous_projection(continuous_features)
+        
+        if self.categorical_embeddings is not None and categorical_features is not None:
+            # Get embeddings for each categorical feature
+            x_categorical_list = []
+            for i, embedding in enumerate(self.categorical_embeddings):
+                # Shape: [batch_size, seq_len, d_categorical_proj//n_categorical]
+                x_categorical_list.append(embedding(categorical_features[:, :, i]))
+            
+            # Concatenate categorical embeddings along feature dimension
+            x_categorical = torch.cat(x_categorical_list, dim=-1)
+            
+            # Combine continuous and categorical
+            x = torch.cat([x_continuous, x_categorical], dim=-1)
+        else:
+            x = x_continuous
+        
+        # Final projection and normalization
+        x = self.combine_projection(x)
+        x = self.dropout(x)
+        x = self.layer_norm(x)
+        
+        return x
+
 class TimeSeriesDecoder(nn.Module):
     def __init__(
         self,
-        d_input: int = 3,
+        d_continuous: int = 2,
+        d_categorical: int = 1,  # Number of categorical features
+        n_bins: int = 10,  # Number of bins for categorical features
         d_model: int = 64,
         n_heads: int = 4,
         n_layers: int = 3,
@@ -360,13 +424,16 @@ class TimeSeriesDecoder(nn.Module):
     ):
         super().__init__()
         
-        self.input_projection = nn.Linear(d_input, d_model)
-        
-        # We don't need pos_embedding buffer since we're using HoPE in the attention layers
-        # when use_hope_pos is True
+        # Replace simple input projection with hybrid embedding
+        self.input_embedding = HybridInputEmbedding(
+            d_continuous=d_continuous,
+            n_categorical=d_categorical,
+            n_bins=n_bins,
+            d_model=d_model,
+            dropout=dropout
+        )
         
         # Calculate how many unique blocks we need
-        # We never reuse first and last blocks, and alternate others
         n_unique_blocks = (n_layers + 3) // 2
         
         # Create the unique decoder blocks
@@ -390,38 +457,32 @@ class TimeSeriesDecoder(nn.Module):
         self.ln_f = nn.LayerNorm(d_model)
         self.output_projection = nn.Linear(d_model, n_outputs)
         self.dropout = nn.Dropout(dropout)
-        
-    def _create_layer_mapping(self, n_layers: int) -> list:
+    
+    def _create_layer_mapping(self, n_layers: int) -> List[int]:
         """Creates a mapping of which block to use at each layer position."""
-        # First block is always unique (index 0)
-        mapping = [0]
+        # First and last blocks are always unique
+        n_unique_blocks = (n_layers + 3) // 2
+        if n_layers <= 2:
+            return list(range(n_layers))
         
-        # For the middle blocks, alternate between pairs
-        middle_start_idx = 1
-        while len(mapping) < n_layers - 1:
-            # Add next two indices
-            mapping.extend([middle_start_idx, middle_start_idx + 1])
-            middle_start_idx += 1
-        
-        # Trim to size if needed (excluding last position)
-        mapping = mapping[:n_layers - 1]
-        
-        # Last block is always the last unique block
-        mapping.append(len(self.blocks) - 1)
+        # For layers in between, alternate between blocks
+        mapping = [0]  # First block
+        for i in range(1, n_layers-1):
+            block_idx = 1 + (i-1) % (n_unique_blocks-2)  # Alternate between blocks 1 to n-2
+            mapping.append(block_idx)
+        mapping.append(n_unique_blocks-1)  # Last block
         
         return mapping
+    
+    def forward(self, continuous_features: torch.Tensor, categorical_features: Optional[torch.Tensor] = None) -> torch.Tensor:
+        # Embed input features
+        x = self.input_embedding(continuous_features, categorical_features)
         
-    def forward(self, x: torch.Tensor):
-        B, T, C = x.shape  # batch size, sequence length, channels
-        
-        # Project input to model dimension
-        x = self.input_projection(x)
-        x = self.dropout(x)
-        
-        # Pass through decoder blocks using the layer mapping
+        # Apply transformer blocks
         for block_idx in self.layer_mapping:
             x = self.blocks[block_idx](x)
-            
-        # Use last sequence element for prediction
-        x = self.ln_f(x[:, -1])
-        return self.output_projection(x)
+        
+        x = self.ln_f(x)
+        x = self.output_projection(x)
+        
+        return x
