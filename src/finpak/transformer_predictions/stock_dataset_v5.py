@@ -90,18 +90,5 @@ class StockDataset(Dataset):
         # Get target (use last value in sequence)
         target = self.targets[idx + self.sequence_length - 1]
         
+        # Return three separate tensors
         return continuous_sequence, categorical_sequence, target
-
-    def collate_fn(self, batch: list) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Custom collate function to ensure proper batching of sequences"""
-        # Separate features and targets
-        continuous_sequences, categorical_sequences, targets = zip(*batch)
-        
-        # Stack features into a single tensor (batch_size, sequence_length, n_features)
-        continuous_sequences = torch.stack(continuous_sequences)
-        categorical_sequences = torch.stack(categorical_sequences)
-        
-        # Stack targets into a single tensor (batch_size, n_targets)
-        targets = torch.stack(targets)
-        
-        return continuous_sequences, categorical_sequences, targets

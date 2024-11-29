@@ -113,12 +113,15 @@ def create_stock_features(
     
     Config parameters:
         - return_periods: List of periods for calculating returns
-        - sma_windows: List of windows for calculating SMAs
+        - sma_periods: List of windows for calculating SMAs
         - target_periods: List of future periods for prediction targets
         - price_change_bins: Optional dict with keys:
             - n_bins: Number of bins for price changes
             - min_val: Optional minimum value for binning
             - max_val: Optional maximum value for binning
+        - use_volatility: Whether to include volatility features
+        - use_momentum: Whether to include momentum features
+        - momentum_periods: List of periods for momentum features
     
     Returns:
         StockFeatures object containing:
@@ -130,6 +133,11 @@ def create_stock_features(
     """
     if debug:
         print("\n=== Feature Creation Debug ===")
+        print("Config keys:", config.keys())
+        if 'data_params' in config:
+            print("Data Params:", config['data_params'])
+        else:
+            print("Warning: 'data_params' not found in config")
         
     # Initialize lists to store features and their names
     continuous_features = []
@@ -143,27 +151,58 @@ def create_stock_features(
         continuous_features.append(returns)
         continuous_feature_names.append(f'return_{period}d')
         
+        # If volatility features are enabled, add them
+        if config.get('use_volatility', False):
+            # Calculate rolling standard deviation of returns
+            vol = torch.zeros_like(returns)
+            for i in range(period, len(returns)):
+                window = returns[i-period:i]
+                if len(window) > 1:  # Ensure we have at least 2 points for std
+                    vol[i] = window.std(unbiased=True)
+                else:
+                    vol[i] = 0.0  # Set to 0 if not enough data points
+            continuous_features.append(vol)
+            continuous_feature_names.append(f'volatility_{period}d')
+        
         # If price change binning is enabled, add categorical features
         if 'price_change_bins' in config:
-            bin_config = config['price_change_bins']
-            binned_returns = create_price_change_bins(
-                returns,
-                n_bins=bin_config['n_bins'],
-                min_val=bin_config.get('min_val', None),
-                max_val=bin_config.get('max_val', None)
-            )
-            categorical_features.append(binned_returns)
-            categorical_feature_names.append(f'return_{period}d_bin')
+            # Only bin the 1-day return
+            if period == 1:
+                bin_config = config['price_change_bins']
+                binned_returns = create_price_change_bins(
+                    returns,
+                    n_bins=bin_config['n_bins'],
+                    min_val=bin_config.get('min_val', None),
+                    max_val=bin_config.get('max_val', None)
+                )
+                categorical_features.append(binned_returns)
+                categorical_feature_names.append(f'return_{period}d_bin')
     
     # Calculate SMAs
-    for window in config['sma_windows']:
+    for window in config['sma_periods']:
         sma = calculate_sma(prices, window)
         continuous_features.append(sma)
         continuous_feature_names.append(f'sma_{window}d')
     
+    # Add momentum features if enabled
+    if config.get('use_momentum', False):
+        for period in config.get('momentum_periods', []):
+            momentum = torch.zeros_like(prices)
+            for i in range(period, len(prices)):
+                momentum[i] = (prices[i] - prices[i-period]) / prices[i-period]
+            continuous_features.append(momentum)
+            continuous_feature_names.append(f'momentum_{period}d')
+    
     # Stack features
     continuous_tensor = torch.stack(continuous_features, dim=1) if continuous_features else torch.tensor([])
     categorical_tensor = torch.stack(categorical_features, dim=1) if categorical_features else torch.tensor([])
+    
+    if debug:
+        print(f"\nFeature counts:")
+        print(f"Continuous features: {len(continuous_feature_names)}")
+        print(f"Categorical features: {len(categorical_feature_names)}")
+        print(f"\nContinuous feature names: {continuous_feature_names}")
+        print(f"Categorical feature names: {categorical_feature_names}")
     
     # Calculate target variables (future returns)
     target_list = []
@@ -181,9 +220,13 @@ def create_stock_features(
     targets = torch.stack(target_list, dim=1)
     
     # Find valid_start_idx (maximum lookback period)
+    lookback_periods = (
+        config['return_periods'] +
+        config['sma_periods'] +
+        (config.get('momentum_periods', []) if config.get('use_momentum', False) else [])
+    )
     valid_start_idx = max(
-        max(config['return_periods']),
-        max(config['sma_windows']),
+        max(lookback_periods),
         max(config['target_periods'])
     )
     

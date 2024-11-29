@@ -1,13 +1,11 @@
 import re, os, torch, argparse
-from data_loading import create_dataloaders
+from data_loading_v5 import create_dataloaders, create_subset_dataloaders
 from timeseries_decoder_v5 import TimeSeriesDecoder
 from train_v5 import train_model
 import pandas as pd
 from finpak.data.fetchers.yahoo import download_multiple_tickers
 from finpak.transformer_predictions.preprocessing_v5 import combine_price_series, create_stock_features
 from ticker_cycler import TickerCycler
-from data_loading import create_dataloaders, create_subset_dataloaders
-
 from configs import all_configs
 from ticker_configs import train_tickers_v10, val_tickers_v10
 
@@ -180,7 +178,7 @@ if __name__ == "__main__":
     # Create model with updated architecture
     model = TimeSeriesDecoder(
         d_continuous=n_continuous,
-        d_categorical=n_categorical,
+        n_categorical=n_categorical,
         n_bins=n_bins,
         d_model=MODEL_PARAMS['d_model'],
         n_heads=MODEL_PARAMS['n_heads'],
@@ -245,14 +243,15 @@ if __name__ == "__main__":
                     else:
                         print("No train subset history found, starting from first subset")
                 
-                # Print loaded metadata for debugging
-                print("Loaded checkpoint metadata:")
-                print(f"  - Original config: {metadata.config}")
-                print(f"  - Training loss: {metadata.train_loss}")
-                print(f"  - Validation loss: {metadata.val_loss}")
-                print(f"  - Model parameters: {metadata.model_params}")
-                print(f"  - Saved at: {metadata.timestamp}")
-                print(f"  - Current train subset: {train_cycler.get_current_subset()}")
+                if DEBUG:
+                    print("\nLoaded checkpoint metadata:")
+                    print(f"  - Original config: {metadata.config}")
+                    print(f"  - Training loss: {metadata.train_loss}")
+                    print(f"  - Validation loss: {metadata.val_loss}")
+                    print(f"  - Model parameters: {metadata.model_params}")
+                    print(f"  - Saved at: {metadata.timestamp}")
+                    print(f"  - Current train subset: {train_cycler.get_current_subset()}")
+                    print(f"  - Current validation subset: {validation_cycler.get_current_subset()}")
             
             # Fall back to old format if metadata not found
             except (KeyError, AttributeError) as e:

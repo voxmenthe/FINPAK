@@ -353,54 +353,181 @@ class HybridInputEmbedding(nn.Module):
         d_model: Model dimension
         dropout: Dropout rate
     """
-    def __init__(self, d_continuous: int, n_categorical: int, n_bins: int, d_model: int, dropout: float = 0.1):
+    def __init__(self, d_continuous: int, n_categorical: int, n_bins: int, d_model: int, dropout: float = 0.1, debug: bool = False):
+        """
+        Initialize the hybrid embedding layer that combines continuous and categorical features.
+        
+        Design decisions:
+        1. Dynamic embedding dimension:
+           - Categorical embedding size scales with d_model
+           - Each categorical feature gets a proportional share of d_model
+           - Remaining space allocated to continuous features
+        
+        2. Space allocation example (for d_model=64):
+           - Total space = 64 dimensions
+           - If n_categorical = 1:
+             * Categorical space = min(16, d_model//4) = 16 dims
+             * Continuous space = 48 dims (remaining space)
+        
+        3. Feature handling:
+           - Continuous features: project from d_continuous to d_continuous_proj
+           - Categorical features: each gets cat_embed_dim dimensions
+        
+        Args:
+            d_continuous (int): Number of continuous input features (e.g., 21)
+            n_categorical (int): Number of categorical features (e.g., 1)
+            n_bins (int): Number of bins for each categorical feature (e.g., 10)
+            d_model (int): Target model dimension (must be even)
+            dropout (float): Dropout rate
+        """
         super().__init__()
+        self.debug = debug
         assert d_model % 2 == 0, "d_model must be even"
         
-        # Split d_model between continuous and categorical features
-        self.d_continuous_proj = (d_model // 2) if n_categorical > 0 else d_model
-        self.d_categorical_proj = d_model - self.d_continuous_proj
+        # Calculate embedding dimensions dynamically based on d_model
+        if n_categorical > 0:
+            # Maximum space for all categorical features combined (25% of d_model)
+            max_categorical_space = d_model // 4
+            
+            # Calculate embedding dim per categorical feature:
+            # 1. At most d_model//4 per feature
+            # 2. At most max_categorical_space divided by number of features
+            # 3. At least 4 dimensions
+            self.cat_embed_dim = max(4, min(d_model // 4, max_categorical_space // n_categorical))
+            
+            # Total space for all categorical features
+            self.d_categorical_proj = n_categorical * self.cat_embed_dim
+            
+            # Remaining space for continuous features
+            self.d_continuous_proj = d_model - self.d_categorical_proj
+            
+            assert self.d_continuous_proj > 0, \
+                f"d_model ({d_model}) too small for {n_categorical} categorical features. " \
+                f"Needed {self.d_categorical_proj} dimensions for categorical, only {self.d_continuous_proj} left for continuous."
+        else:
+            self.cat_embed_dim = 0
+            self.d_continuous_proj = d_model
+            self.d_categorical_proj = 0
         
-        # Projections for continuous features
+        if self.debug:
+            print(f"\n=== HybridInputEmbedding Initialization ===")
+            print(f"Model dimension (d_model): {d_model}")
+            print(f"Continuous features: {d_continuous} -> {self.d_continuous_proj}")
+            print(f"Categorical features: {n_categorical}")
+            print(f"Categorical embedding dim per feature: {self.cat_embed_dim}")
+            print(f"Total categorical dimensions: {self.d_categorical_proj}")
+            print(f"Final dimensions: {self.d_continuous_proj + self.d_categorical_proj} (should equal {d_model})")
+        
+        # Verify dimensions add up correctly
+        assert self.d_continuous_proj + self.d_categorical_proj == d_model, \
+            f"Dimension mismatch: continuous ({self.d_continuous_proj}) + categorical ({self.d_categorical_proj}) != d_model ({d_model})"
+        
+        # Create layers
+        # 1. Continuous projection: maps from d_continuous to d_continuous_proj
         self.continuous_projection = nn.Linear(d_continuous, self.d_continuous_proj)
         
-        # Embeddings for categorical features
+        # 2. Categorical embeddings: one per categorical feature
         if n_categorical > 0:
             self.categorical_embeddings = nn.ModuleList([
-                nn.Embedding(n_bins, self.d_categorical_proj // n_categorical)
+                nn.Embedding(n_bins, self.cat_embed_dim)
                 for _ in range(n_categorical)
             ])
         else:
             self.categorical_embeddings = None
         
-        # Final projection to combine features
-        self.combine_projection = nn.Linear(d_model, d_model)
+        # 3. Final normalization (operating on d_model total dimensions)
         self.dropout = nn.Dropout(dropout)
         self.layer_norm = nn.LayerNorm(d_model)
     
-    def forward(self, continuous_features: torch.Tensor, categorical_features: Optional[torch.Tensor] = None) -> torch.Tensor:
-        # Project continuous features
-        x_continuous = self.continuous_projection(continuous_features)
+    def forward(self, continuous_features: torch.Tensor, categorical_features: Optional[torch.Tensor] = None, debug: bool = False) -> torch.Tensor:
+        """
+        Process both continuous and categorical features through the hybrid embedding layer.
         
-        if self.categorical_embeddings is not None and categorical_features is not None:
-            # Get embeddings for each categorical feature
-            x_categorical_list = []
-            for i, embedding in enumerate(self.categorical_embeddings):
-                # Shape: [batch_size, seq_len, d_categorical_proj//n_categorical]
-                x_categorical_list.append(embedding(categorical_features[:, :, i]))
+        Input Shapes:
+            continuous_features: [batch_size, seq_len, d_continuous]
+                - batch_size: Number of samples in the batch (e.g., 64)
+                - seq_len: Length of the time series (e.g., 56)
+                - d_continuous: Number of continuous features (e.g., 21)
             
-            # Concatenate categorical embeddings along feature dimension
-            x_categorical = torch.cat(x_categorical_list, dim=-1)
+            categorical_features: [batch_size, seq_len, n_categorical]
+                - n_categorical: Number of categorical features (e.g., 10)
+                - Values are indices into embedding tables
+        
+        Processing Steps:
+        1. Continuous Features:
+           - Project from d_continuous (21) to d_continuous_proj (~322)
+           - This expands the feature space for better representation
+        
+        2. Categorical Features:
+           - Each feature is embedded from a single index to cat_embed_dim (~10)
+           - Total categorical dims = n_categorical (10) * cat_embed_dim (~10) ≈ 102
+        
+        3. Combined Output:
+           - Concatenate continuous (322) and categorical (102) features
+           - Final dimension = 424 (matches d_model)
+           
+        Returns:
+            Tensor of shape [batch_size, seq_len, d_model]
+        """
+        batch_size, seq_len, _ = continuous_features.shape
+        
+        if debug:
+            print(f"\n=== HybridInputEmbedding Forward Pass ===")
+            print(f"Input continuous shape: {continuous_features.shape}")
+            if categorical_features is not None:
+                print(f"Input categorical shape: {categorical_features.shape}")
+        
+        # 1. Process continuous features
+        # Reshape to [batch_size * seq_len, d_continuous] for efficient batch processing
+        x_continuous = continuous_features.reshape(-1, continuous_features.size(-1))
+        # Project to higher dimensional space [batch_size * seq_len, d_continuous_proj]
+        x_continuous = self.continuous_projection(x_continuous)
+        # Restore batch and sequence dimensions [batch_size, seq_len, d_continuous_proj]
+        x_continuous = x_continuous.reshape(batch_size, seq_len, -1)
+        
+        if debug:
+            print(f"Reshaped continuous after projection: {x_continuous.shape}")
+        
+        # 2. Process categorical features if present
+        if categorical_features is not None:
+            # Remove singleton dimension [batch_size, seq_len, 1] -> [batch_size, seq_len]
+            categorical_features = categorical_features.squeeze(-1)
+            if debug:
+                print(f"Categorical indices shape: {categorical_features.shape}")
             
-            # Combine continuous and categorical
+            # Process each categorical feature through its own embedding layer
+            x_categoricals = []
+            for i, embedding_layer in enumerate(self.categorical_embeddings):
+                # Convert indices to embeddings [batch_size, seq_len] -> [batch_size, seq_len, cat_embed_dim]
+                x_cat = embedding_layer(categorical_features)
+                x_categoricals.append(x_cat)
+            
+            # Combine all categorical embeddings along feature dimension
+            # Shape: [batch_size, seq_len, n_categorical * cat_embed_dim]
+            x_categorical = torch.cat(x_categoricals, dim=-1)
+            if debug:
+                print(f"Categorical embedding shape: {x_categorical.shape}")
+            
+            # Combine continuous and categorical features
+            # Shape: [batch_size, seq_len, d_continuous_proj + (n_categorical * cat_embed_dim)]
             x = torch.cat([x_continuous, x_categorical], dim=-1)
+            if debug:
+                print(f"After concatenation shape: {x.shape}")
+                print(f"Expected final dimension: {self.d_continuous_proj + self.d_categorical_proj}")
         else:
             x = x_continuous
         
-        # Final projection and normalization
-        x = self.combine_projection(x)
+        # Verify dimensions match exactly
+        expected_dim = self.d_continuous_proj + (self.d_categorical_proj if categorical_features is not None else 0)
+        assert x.size(-1) == expected_dim, \
+            f"Expected feature dim {expected_dim}, got {x.size(-1)}"
+        
+        # Apply normalization and dropout
         x = self.dropout(x)
         x = self.layer_norm(x)
+        
+        if debug:
+            print(f"Final output shape: {x.shape}\n")
         
         return x
 
@@ -408,7 +535,7 @@ class TimeSeriesDecoder(nn.Module):
     def __init__(
         self,
         d_continuous: int = 2,
-        d_categorical: int = 1,  # Number of categorical features
+        n_categorical: int = 1,  # Number of categorical features
         n_bins: int = 10,  # Number of bins for categorical features
         d_model: int = 64,
         n_heads: int = 4,
@@ -427,9 +554,9 @@ class TimeSeriesDecoder(nn.Module):
         # Replace simple input projection with hybrid embedding
         self.input_embedding = HybridInputEmbedding(
             d_continuous=d_continuous,
-            n_categorical=d_categorical,
+            n_categorical=n_categorical,
             n_bins=n_bins,
-            d_model=d_model,
+            d_model=d_model,  # Now passing 424 instead of 64
             dropout=dropout
         )
         
@@ -475,6 +602,24 @@ class TimeSeriesDecoder(nn.Module):
         return mapping
     
     def forward(self, continuous_features: torch.Tensor, categorical_features: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Forward pass through the TimeSeriesDecoder.
+        
+        Input Shapes:
+            continuous_features: [batch_size, seq_len, d_continuous]
+            categorical_features: [batch_size, seq_len, n_categorical] (optional)
+            
+        Processing Steps:
+        1. Embed input features to dimension d_model
+        2. Apply transformer blocks for temporal processing
+        3. Apply final layer normalization
+        4. Project to output dimension
+        5. Select only the final timestep predictions
+        
+        Returns:
+            Tensor of shape [batch_size, n_outputs] containing predictions
+            for the final timestep only
+        """
         # Embed input features
         x = self.input_embedding(continuous_features, categorical_features)
         
@@ -482,7 +627,11 @@ class TimeSeriesDecoder(nn.Module):
         for block_idx in self.layer_mapping:
             x = self.blocks[block_idx](x)
         
+        # Final processing
         x = self.ln_f(x)
         x = self.output_projection(x)
+        
+        # Select only the final timestep predictions
+        x = x[:, -1, :]  # Shape: [batch_size, n_outputs]
         
         return x

@@ -2,16 +2,22 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from typing import List, Tuple, Optional, Dict, Any
-from torch.utils.data import DataLoader
 import os
-from heapq import heappush, heappushpop
+import tempfile
+from pathlib import Path
+import numpy as np
+import json
+from datetime import datetime
+import matplotlib.pyplot as plt
+from typing import Optional, Dict, Any, List, Tuple
+import pandas as pd
+from torch.optim.lr_scheduler import _LRScheduler
+from torch.optim import Optimizer
+from torch.utils.data import DataLoader
+from data_loading_v5 import create_subset_dataloaders
 from early_stopping import EarlyStopping
 from ticker_cycler import TickerCycler
 import random
-from data_loading import create_subset_dataloaders
-import pandas as pd
 import signal
 import sys
 from dataclasses import dataclass
@@ -19,9 +25,8 @@ from torch.serialization import add_safe_globals
 from optimizers import CAdamW
 import time
 import shutil
-from pathlib import Path
-import tempfile
 import glob
+import heapq
 
 OPTIMIZER = CAdamW # torch.optim.AdamW
 
@@ -141,8 +146,7 @@ def train_model(
     early_stopping = EarlyStopping(
         patience=patience,
         min_epochs=min_epochs,
-        min_delta=train_params.get('min_delta', 0),
-        max_checkpoints=train_params.get('max_checkpoints', 3)
+        min_delta=train_params.get('min_delta', 0)
     )
 
     # Initialize training history
@@ -152,16 +156,32 @@ def train_model(
     train_cycle = 0
     val_cycle = 0
     
-    # Track cycle completion status
-    train_cycle_completed = not train_cycler  # True if train cycling is disabled
-    val_cycle_completed = not validation_cycler  # True if validation cycling is disabled
+    # Initialize cycling variables
+    current_subset_checkpoints = []
+    current_subset_start_epoch = start_epoch
+    
+    # Initialize train and val subsets if starting from scratch
+    if start_epoch == 0:
+        if train_cycler:
+            train_cycler.reset()  # Start from subset 0
+        if validation_cycler:
+            validation_cycler.reset()  # Start from subset 0
+            
+        # Create initial dataloaders with first subsets
+        if train_cycler or validation_cycler:
+            train_loader, val_loader = create_subset_dataloaders(
+                train_df=train_df,
+                val_df=val_df,
+                train_tickers=train_cycler.get_current_subset() if train_cycler else None,
+                val_tickers=validation_cycler.get_current_subset() if validation_cycler else None,
+                config=config,
+                debug=debug
+            )
 
     # Create checkpoint directory if it doesn't exist
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     # Initialize tracking variables
-    current_subset_checkpoints = []
-    current_subset_start_epoch = 0
     best_models = []  # heap of (negative val_loss, epoch, cycle) tuples
 
     # Training loop
@@ -170,74 +190,100 @@ def train_model(
             print(f"Reached maximum epochs ({max_epochs})")
             break
 
-        model.train()
-        total_train_loss = 0
-        num_batches = 0
-
-        # Training phase
-        for batch_idx, (features, targets) in enumerate(train_loader):
-            # Unpack features into continuous and categorical
-            continuous_features, categorical_features = features
+        def train_epoch(model, train_loader, optimizer, criterion, device, debug=False):
+            model.train()
+            total_loss = 0
             
-            # Move to device
-            continuous_features = continuous_features.to(device)
-            categorical_features = categorical_features.to(device)
-            targets = targets.to(device)
+            if debug:
+                # Debug print DataLoader info
+                print("\n=== Debug: Training Loop ===")
+                print("DataLoader type:", type(train_loader))
+                print("DataLoader length:", len(train_loader))
+                print("DataLoader batch size:", train_loader.batch_size)
+                print("DataLoader collate_fn:", train_loader.collate_fn)
             
-            # Forward pass
-            outputs = model(continuous_features, categorical_features)
-            loss = F.mse_loss(outputs, targets)
-            
-            # Backward pass
-            optimizer.zero_grad()
-            loss.backward()
-            
-            # Gradient clipping
-            if gradient_clip > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
-            
-            optimizer.step()
-            scheduler.step()
-            
-            total_train_loss += loss.item()
-            num_batches += 1
-
-            if debug and batch_idx % 100 == 0:
-                print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item():.6f}")
-
-        avg_train_loss = total_train_loss / num_batches
-        train_losses.append(avg_train_loss)
-
-        # Validation phase
-        model.eval()
-        total_val_loss = 0
-        num_val_batches = 0
-
-        with torch.no_grad():
-            for features, targets in val_loader:
-                # Unpack features into continuous and categorical
-                continuous_features, categorical_features = features
+            for batch_idx, batch in enumerate(train_loader):
+                # Debug print first batch
+                if batch_idx == 0 and debug:
+                    print("\nFirst batch info:")
+                    print("Batch type:", type(batch))
+                    print("Batch length:", len(batch))
+                    if isinstance(batch, (tuple, list)):
+                        for i, item in enumerate(batch):
+                            print(f"Item {i} type:", type(item))
+                            if isinstance(item, torch.Tensor):
+                                print(f"Item {i} shape:", item.shape)
+                    print("=== End Debug ===\n")
                 
-                # Move to device
+                # Unpack batch
+                continuous_features, categorical_features, targets = batch
+                
+                # Move data to device
                 continuous_features = continuous_features.to(device)
                 categorical_features = categorical_features.to(device)
                 targets = targets.to(device)
                 
-                outputs = model(continuous_features, categorical_features)
-                val_loss = F.mse_loss(outputs, targets)
+                # Zero gradients
+                optimizer.zero_grad()
                 
-                total_val_loss += val_loss.item()
-                num_val_batches += 1
+                # Forward pass
+                outputs = model(continuous_features, categorical_features)
+                
+                # Calculate loss
+                loss = criterion(outputs, targets)
+                
+                # Backward pass
+                loss.backward()
+                
+                # Update weights
+                optimizer.step()
+                
+                # Accumulate loss
+                total_loss += loss.item()
+                
+                if debug and batch_idx % 10 == 0:
+                    print(f'Batch {batch_idx}: Loss = {loss.item():.6f}')
+            
+            return total_loss / len(train_loader)
 
-        avg_val_loss = total_val_loss / num_val_batches
+        def validate(model, val_loader, criterion, device):
+            model.eval()
+            total_loss = 0
+            
+            with torch.no_grad():
+                for batch in val_loader:
+                    # Unpack batch
+                    continuous_features, categorical_features, targets = batch
+                    
+                    # Move data to device
+                    continuous_features = continuous_features.to(device)
+                    categorical_features = categorical_features.to(device)
+                    targets = targets.to(device)
+                    
+                    # Forward pass
+                    outputs = model(continuous_features, categorical_features)
+                    
+                    # Calculate loss
+                    loss = criterion(outputs, targets)
+                    
+                    # Accumulate loss
+                    total_loss += loss.item()
+            
+            return total_loss / len(val_loader)
+
+        avg_train_loss = train_epoch(model, train_loader, optimizer, F.mse_loss, device, debug)
+        avg_val_loss = validate(model, val_loader, F.mse_loss, device)
+
+        train_losses.append(avg_train_loss)
         val_losses.append(avg_val_loss)
 
-        # Print epoch results
-        print(f"Epoch {epoch}: Train Loss = {avg_train_loss:.6f}, Val Loss = {avg_val_loss:.6f}")
-
-        # Save checkpoint if validation loss improved
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
+        # Track the checkpoint for the current subset
+        epochs_in_subset = epoch - current_subset_start_epoch + 1
+        current_checkpoint = (avg_val_loss, epoch, None, epochs_in_subset)  # Placeholder for checkpoint name
+        
+        # Check if this is one of the N best checkpoints
+        if len(current_subset_checkpoints) < train_params.get('checkpoints_per_subset', 3) or \
+           avg_val_loss < max(c[0] for c in current_subset_checkpoints):
             
             # Create metadata
             metadata = TrainingMetadata(
@@ -273,17 +319,33 @@ def train_model(
             checkpoint_name = f"{config['train_params'].get('prefix', 'model')}_e{epoch}_valloss_{avg_val_loss:.7f}{cycle_info}.pt"
             checkpoint_path = os.path.join(checkpoint_dir, checkpoint_name)
             
-            # Track checkpoint for current subset
-            epochs_in_subset = epoch - current_subset_start_epoch + 1
-            current_subset_checkpoints.append((avg_val_loss, epoch, checkpoint_name, epochs_in_subset))
-            
             # Save checkpoint safely
             safe_torch_save(checkpoint, checkpoint_path)
+            print(f"Saved checkpoint: {checkpoint_name}")
+            
+            # Update current_checkpoint with the actual name
+            current_checkpoint = (avg_val_loss, epoch, checkpoint_name, epochs_in_subset)
+            
+            # Add to current subset checkpoints, maintaining only the N best
+            current_subset_checkpoints.append(current_checkpoint)
+            current_subset_checkpoints.sort(key=lambda x: x[0])  # Sort by val_loss
+            if len(current_subset_checkpoints) > train_params.get('checkpoints_per_subset', 3):
+                # Remove the worst checkpoint file and entry
+                _, _, worst_checkpoint_name, _ = current_subset_checkpoints.pop()
+                worst_checkpoint_path = os.path.join(checkpoint_dir, worst_checkpoint_name)
+                if os.path.exists(worst_checkpoint_path):
+                    try:
+                        os.remove(worst_checkpoint_path)
+                        print(f"Removed checkpoint with higher loss: {worst_checkpoint_name}")
+                    except OSError as e:
+                        print(f"Error removing checkpoint {worst_checkpoint_name}: {e}")
 
         # Early stopping check
-        if early_stopping(avg_val_loss, epoch):
+        if early_stopping(avg_val_loss):
+            print(f"Epoch {epoch}: Train Loss = {avg_train_loss:.6f}, Val Loss = {avg_val_loss:.6f}")
             print(f"Early stopping triggered after {epoch + 1} epochs")
             
+            # Check if we have more train subsets
             if train_cycler and train_cycler.has_more_subsets():
                 # Find best checkpoint from current subset
                 valid_checkpoints = [(loss, ep, name) for loss, ep, name, epochs in current_subset_checkpoints if epochs >= min_epochs]
@@ -299,76 +361,47 @@ def train_model(
                     model.load_state_dict(checkpoint['model_state_dict'])
                     model = model.to(device)
                     
-                    # Reinitialize optimizer and scheduler
-                    optimizer = OPTIMIZER(optimizer_grouped_parameters, lr=learning_rate)
-                    scheduler = get_scheduler(optimizer, config, len(train_loader))
+                    # Manage checkpoints for the completed subset
+                    manage_checkpoints(
+                        checkpoint_dir=checkpoint_dir,
+                        current_subset_checkpoints=current_subset_checkpoints,
+                        best_models=best_models,
+                        min_epochs_per_subset=min_epochs,
+                        current_cycle=train_cycle
+                    )
                 
                 # Reset checkpoint tracking for new subset
                 current_subset_checkpoints = []
                 current_subset_start_epoch = epoch + 1
                 
+                # Reset early stopping for new subset
+                early_stopping = EarlyStopping(
+                    patience=patience,
+                    min_epochs=min_epochs,
+                    min_delta=train_params.get('min_delta', 0)
+                )
+                
                 # Move to next training subset
                 print(f"\nSwitching to next training subset after epoch {epoch}")
-                train_cycler.next_subset()
+                next_train_subset = train_cycler.next_subset()
                 train_cycle += 1
-                
-                # Update validation subset if cycling is enabled
-                if validation_cycler:
-                    if not validation_cycler.has_more_subsets():
-                        validation_cycler.reset()
-                        val_cycle_completed = True
-                    validation_cycler.next_subset()
-                    val_cycle += 1
+                trained_subsets.append(next_train_subset)
                 
                 # Create new dataloaders with updated subsets
-                train_loader = create_subset_dataloaders(
-                    df=train_df,
+                train_loader, val_loader = create_subset_dataloaders(
+                    train_df=train_df,
+                    val_df=val_df,
+                    train_tickers=next_train_subset,
+                    val_tickers=validation_cycler.get_current_subset() if validation_cycler else None,
                     config=config,
-                    tickers=train_cycler.get_current_subset(),
-                    batch_size=config['train_params']['batch_size'],
-                    sequence_length=config['data_params']['sequence_length'],
                     debug=debug
                 )
                 
-                if validation_cycler:
-                    val_loader = create_subset_dataloaders(
-                        df=val_df,
-                        config=config,
-                        tickers=validation_cycler.get_current_subset(),
-                        batch_size=config['train_params']['batch_size'],
-                        sequence_length=config['data_params']['sequence_length'],
-                        debug=debug
-                    )
             else:
+                # If we have no more train subsets but still have val subsets, end training
+                if validation_cycler and validation_cycler.has_more_subsets():
+                    print("\nNo more training subsets available. Ending training.")
                 break
-
-        # Check if we should cycle validation set
-        if validation_cycler and validation_cycler.should_cycle(epoch):
-            print("\nCycling validation set...")
-            val_cycle += 1
-            val_loader = create_subset_dataloaders(
-                df=val_df,
-                config=config,
-                tickers=validation_cycler.get_next_subset(),
-                batch_size=config['train_params']['batch_size'],
-                sequence_length=config['data_params']['sequence_length'],
-                debug=debug
-            )
-
-        # Check if we should cycle training set
-        if train_cycler and train_cycler.should_cycle(epoch):
-            print("\nCycling training set...")
-            train_cycle += 1
-            next_subset = train_cycler.get_next_subset()
-            trained_subsets.append(next_subset)
-            train_loader = create_subset_dataloaders(
-                df=train_df,
-                config=config,
-                tickers=next_subset,
-                batch_size=config['train_params']['batch_size'],
-                sequence_length=config['data_params']['sequence_length'],
-                debug=debug
-            )
 
     return train_losses, val_losses
 
@@ -439,15 +472,14 @@ def get_scheduler(optimizer, config, steps_per_epoch):
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 def manage_checkpoints(checkpoint_dir: str, current_subset_checkpoints: List[Tuple[float, int, str, int]], 
-                      best_models: List[Tuple[float, int, Tuple[int, int]]], max_checkpoints: int,
-                      min_epochs_per_subset: int = 2, current_cycle: int = 0) -> None:
+                      best_models: List[Tuple[float, int, Tuple[int, int]]], min_epochs_per_subset: int = 2, 
+                      current_cycle: int = 0) -> None:
     """Manage checkpoints when transitioning between subsets.
     
     Args:
         checkpoint_dir: Directory containing checkpoints
         current_subset_checkpoints: List of (val_loss, epoch, checkpoint_name, epochs_in_subset)
         best_models: Global list of best models (val_loss, epoch, cycle)
-        max_checkpoints: Maximum number of checkpoints to keep globally
         min_epochs_per_subset: Minimum number of epochs a model should train on a subset
         current_cycle: Current training cycle number (increments each time we cycle through all subsets)
     """
@@ -459,49 +491,40 @@ def manage_checkpoints(checkpoint_dir: str, current_subset_checkpoints: List[Tup
                            in current_subset_checkpoints if epochs >= min_epochs_per_subset]
     
     if qualified_checkpoints:
-        # Keep only the best qualified checkpoint from this cycle
+        # Keep only the best qualified checkpoint from this subset
         best_checkpoint = min(qualified_checkpoints, key=lambda x: x[0])
-        keep_file = best_checkpoint[2]
+        best_loss, best_epoch, best_name, _ = best_checkpoint
         
-        # Get all checkpoints for the current subset (based on subset identifier in filename)
-        subset_identifier = keep_file.split('_')[1]  # Assuming format like "checkpoint_subset1_epoch10.pt"
-        all_subset_checkpoints = []
-        for f in glob.glob(os.path.join(checkpoint_dir, f"*_{subset_identifier}_*.pt")):
-            try:
-                # Extract cycle number from metadata in checkpoint
-                checkpoint = torch.load(f, map_location='cpu')
-                checkpoint_cycle = checkpoint['metadata'].train_cycle
-                all_subset_checkpoints.append((f, checkpoint_cycle))
-            except Exception as e:
-                print(f"Error reading checkpoint {f}: {e}")
-                continue
+        # Add to global best models list with cycle information
+        heapq.heappush(best_models, (best_loss, best_epoch, (current_cycle, best_epoch)))
         
-        # Keep only the checkpoint from the current cycle
-        for checkpoint_path, cycle_num in all_subset_checkpoints:
-            checkpoint_name = os.path.basename(checkpoint_path)
-            if checkpoint_name != keep_file:  # Don't delete our current best checkpoint
+        # Delete all other checkpoints from this subset
+        for loss, epoch, name, _ in current_subset_checkpoints:
+            if name != best_name:  # Don't delete the best checkpoint
                 try:
-                    os.remove(checkpoint_path)
-                    print(f"Deleted old checkpoint from cycle {cycle_num}: {checkpoint_name}")
+                    checkpoint_path = os.path.join(checkpoint_dir, name)
+                    if os.path.exists(checkpoint_path):
+                        os.remove(checkpoint_path)
+                        print(f"Removed non-best checkpoint from subset: {name}")
                 except OSError as e:
-                    print(f"Error deleting checkpoint {checkpoint_name}: {e}")
+                    print(f"Error removing checkpoint {name}: {e}")
         
-        # Ensure we don't exceed max_checkpoints globally
-        # Only consider checkpoints with the same prefix (from current config)
-        prefix = keep_file.split('_')[0]  # Extract prefix from current checkpoint name
-        all_checkpoints = glob.glob(os.path.join(checkpoint_dir, f"{prefix}_*.pt"))
-        if len(all_checkpoints) > max_checkpoints:
-            # Sort checkpoints by modification time (oldest first)
-            checkpoints_with_time = [(f, os.path.getmtime(f)) for f in all_checkpoints]
-            checkpoints_with_time.sort(key=lambda x: x[1])
+        # Enforce global maximum checkpoint constraint
+        while len(best_models) > 10:
+            # Get the worst model from our heap of best models
+            worst_loss, worst_epoch, (worst_cycle, _) = heapq.heappop(best_models)
             
-            # Delete oldest checkpoints until we're at max_checkpoints
-            for checkpoint_path, _ in checkpoints_with_time[:-max_checkpoints]:
+            # Find and delete its checkpoint
+            for f in glob.glob(os.path.join(checkpoint_dir, "*.pt")):
                 try:
-                    os.remove(checkpoint_path)
-                    print(f"Deleted old checkpoint: {os.path.basename(checkpoint_path)}")
-                except OSError as e:
-                    print(f"Error deleting old checkpoint {checkpoint_path}: {e}")
+                    checkpoint = torch.load(f, map_location='cpu')
+                    if (checkpoint['metadata'].train_cycle == worst_cycle and 
+                        checkpoint['epoch'] == worst_epoch):
+                        os.remove(f)
+                        print(f"Removed checkpoint to maintain global maximum: {os.path.basename(f)}")
+                        break
+                except Exception as e:
+                    print(f"Error processing checkpoint {f}: {e}")
 
 def safe_torch_save(checkpoint, save_path, max_retries=3):
     """Safely save PyTorch checkpoint with retries and temporary file."""

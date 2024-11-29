@@ -6,6 +6,47 @@ from stock_dataset_v5 import StockDataset, StockFeatures
 from preprocessing_v5 import create_stock_features, combine_price_series
 
 
+def collate_fn(batch, debug: bool = False):
+    """Custom collate function for batching sequences"""
+    if debug:
+        print("\n=== Debug: Inside module collate_fn ===")
+        print("Batch type:", type(batch))
+        print("Batch length:", len(batch))
+        if batch:
+            print("First item type:", type(batch[0]))
+            print("First item length:", len(batch[0]))
+    
+    # Unpack the batch into separate tensors
+    continuous_sequences, categorical_sequences, targets = zip(*batch)
+    
+    if debug:
+        print("\nAfter unpacking:")
+        print("Continuous sequences type:", type(continuous_sequences))
+        print("Continuous sequences length:", len(continuous_sequences))
+        print("First continuous sequence shape:", continuous_sequences[0].shape)
+        print("Categorical sequences type:", type(categorical_sequences))
+        print("First categorical sequence shape:", categorical_sequences[0].shape)
+        print("Targets type:", type(targets))
+        print("First target shape:", targets[0].shape)
+    
+    # Stack features into a single tensor (batch_size, sequence_length, n_features)
+    continuous_sequences = torch.stack(continuous_sequences)
+    categorical_sequences = torch.stack(categorical_sequences)
+    
+    # Stack targets into a single tensor (batch_size, n_targets)
+    targets = torch.stack(targets)
+
+    if debug:
+        print("\nFinal tensor shapes:")
+        print("Continuous shape:", continuous_sequences.shape)
+        print("Categorical shape:", categorical_sequences.shape)
+        print("Targets shape:", targets.shape)
+        print("=== End Debug ===\n")
+    
+    # Return three separate tensors
+    return continuous_sequences, categorical_sequences, targets
+
+
 def create_dataloaders(
     train_prices: torch.Tensor,
     val_prices: torch.Tensor,
@@ -64,20 +105,36 @@ def create_dataloaders(
     )
 
     # Create dataloaders
+    if debug:
+        print("\n=== Debug: Creating DataLoaders ===")
+        print("Train dataset type:", type(train_dataset))
+        print("Train dataset length:", len(train_dataset))
+        print("First item from train dataset:", train_dataset[0])
+        print("Batch size:", config['train_params']['batch_size'])
+    
     train_loader = DataLoader(
         train_dataset,
         batch_size=config['train_params']['batch_size'],
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=True
+        pin_memory=True,
+        collate_fn=collate_fn
     )
+
+    if debug:
+        print("\n=== Debug: Creating Validation DataLoaders ===")
+        print("Validation dataset type:", type(val_dataset))
+        print("Validation dataset length:", len(val_dataset))
+        print("First item from validation dataset:", val_dataset[0])
+        print("Batch size:", config['train_params']['batch_size'])
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=config['train_params']['batch_size'],
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True
+        pin_memory=True,
+        collate_fn=collate_fn
     )
 
     return (
