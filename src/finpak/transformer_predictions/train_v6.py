@@ -14,7 +14,7 @@ import pandas as pd
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
-from data_loading_v5 import create_subset_dataloaders
+from data_loading_v6 import create_subset_dataloaders
 from early_stopping import EarlyStopping
 from ticker_cycler import TickerCycler
 import random
@@ -90,7 +90,7 @@ def train_model(
         val_loader: DataLoader for validation data
         device: Device to train on
         start_epoch: Epoch to start/resume training from
-        config: Configuration dictionary
+        config: Configuration dictionary containing loss weights
         checkpoint_dir: Directory to save checkpoints
         validation_cycler: Optional TickerCycler for validation set cycling
         train_cycler: Optional TickerCycler for training set cycling
@@ -152,6 +152,8 @@ def train_model(
     # Initialize training history
     train_losses = []
     val_losses = []
+    train_loss_components = {'continuous': [], 'categorical': []}
+    val_loss_components = {'continuous': [], 'categorical': []}
     best_val_loss = float('inf')
     train_cycle = 0
     val_cycle = 0
@@ -184,98 +186,154 @@ def train_model(
     # Initialize tracking variables
     best_models = []  # heap of (negative val_loss, epoch, cycle) tuples
 
-    # Training loop
-    for epoch in range(start_epoch, num_epochs):
-        if epoch >= max_epochs:
-            print(f"Reached maximum epochs ({max_epochs})")
-            break
+    def calculate_loss(outputs, targets, loss_weights):
+        """Calculate weighted combination of continuous and categorical losses."""
+        if isinstance(outputs, tuple):
+            continuous_out, categorical_out = outputs
+            continuous_targets, categorical_targets = targets
+            
+            # MSE loss for continuous predictions
+            continuous_loss = F.mse_loss(continuous_out, continuous_targets)
+            
+            # Cross entropy loss for each categorical feature
+            categorical_loss = 0
+            if categorical_out is not None and categorical_targets is not None:
+                for i in range(len(categorical_out)):
+                    categorical_loss += F.cross_entropy(categorical_out[i], categorical_targets[:, i])
+                categorical_loss /= len(categorical_out)  # Average across features
+            
+            # Combine losses using weights
+            total_loss = (loss_weights['continuous'] * continuous_loss + 
+                        loss_weights['categorical'] * categorical_loss)
+            
+            return total_loss, {
+                'continuous': continuous_loss.item(),
+                'categorical': categorical_loss.item() if isinstance(categorical_loss, torch.Tensor) else 0
+            }
+        else:
+            # Backward compatibility for models without categorical predictions
+            return F.mse_loss(outputs, targets), {'continuous': F.mse_loss(outputs, targets).item(), 'categorical': 0}
 
-        def train_epoch(model, train_loader, optimizer, criterion, device, debug=False):
-            model.train()
-            total_loss = 0
+    def train_epoch(model, train_loader, optimizer, device, loss_weights, debug=False):
+        model.train()
+        total_loss = 0
+        
+        if debug:
+            # Debug print DataLoader info
+            print("\n=== Debug: Training Loop ===")
+            print("DataLoader type:", type(train_loader))
+            print("DataLoader length:", len(train_loader))
+            print("DataLoader batch size:", train_loader.batch_size)
+            print("DataLoader collate_fn:", train_loader.collate_fn)
+        
+        for batch_idx, batch in enumerate(train_loader):
+            # Debug print first batch
+            if batch_idx == 0 and debug:
+                print("\nFirst batch info:")
+                print("Batch type:", type(batch))
+                print("Batch length:", len(batch))
+                if isinstance(batch, (tuple, list)):
+                    for i, item in enumerate(batch):
+                        print(f"Item {i} type:", type(item))
+                        if isinstance(item, torch.Tensor):
+                            print(f"Item {i} shape:", item.shape)
+                print("=== End Debug ===\n")
             
-            if debug:
-                # Debug print DataLoader info
-                print("\n=== Debug: Training Loop ===")
-                print("DataLoader type:", type(train_loader))
-                print("DataLoader length:", len(train_loader))
-                print("DataLoader batch size:", train_loader.batch_size)
-                print("DataLoader collate_fn:", train_loader.collate_fn)
+            # Unpack batch
+            continuous_features, categorical_features, targets = batch
             
-            for batch_idx, batch in enumerate(train_loader):
-                # Debug print first batch
-                if batch_idx == 0 and debug:
-                    print("\nFirst batch info:")
-                    print("Batch type:", type(batch))
-                    print("Batch length:", len(batch))
-                    if isinstance(batch, (tuple, list)):
-                        for i, item in enumerate(batch):
-                            print(f"Item {i} type:", type(item))
-                            if isinstance(item, torch.Tensor):
-                                print(f"Item {i} shape:", item.shape)
-                    print("=== End Debug ===\n")
-                
+            # Move data to device
+            continuous_features = continuous_features.to(device)
+            categorical_features = categorical_features.to(device)
+            targets = targets.to(device)
+            
+            # Zero gradients
+            optimizer.zero_grad()
+            
+            # Forward pass
+            outputs = model(continuous_features, categorical_features)
+            
+            # Calculate loss with both continuous and categorical components
+            loss, loss_components = calculate_loss(outputs, targets, loss_weights)
+            
+            # Backward pass
+            loss.backward()
+            
+            # Clip gradients
+            if gradient_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
+            
+            # Update weights
+            optimizer.step()
+            
+            # Accumulate losses
+            total_loss += loss.item()
+            
+            if debug and batch_idx % 10 == 0:
+                print(f'Batch {batch_idx}: Total Loss = {loss.item():.6f}')
+                print(f'  Continuous Loss = {loss_components["continuous"]:.6f}')
+                print(f'  Categorical Loss = {loss_components["categorical"]:.6f}')
+        
+        return total_loss / len(train_loader)
+
+    def validate(model, val_loader, device, loss_weights):
+        model.eval()
+        total_loss = 0
+        loss_components_sum = {'continuous': 0, 'categorical': 0}
+        
+        with torch.no_grad():
+            for batch in val_loader:
                 # Unpack batch
                 continuous_features, categorical_features, targets = batch
                 
                 # Move data to device
                 continuous_features = continuous_features.to(device)
                 categorical_features = categorical_features.to(device)
-                targets = targets.to(device)
-                
-                # Zero gradients
-                optimizer.zero_grad()
+                if isinstance(targets, tuple):
+                    targets = tuple(t.to(device) for t in targets)
+                else:
+                    targets = targets.to(device)
                 
                 # Forward pass
                 outputs = model(continuous_features, categorical_features)
                 
                 # Calculate loss
-                loss = criterion(outputs, targets)
+                loss, batch_components = calculate_loss(outputs, targets, loss_weights)
                 
-                # Backward pass
-                loss.backward()
-                
-                # Update weights
-                optimizer.step()
-                
-                # Accumulate loss
+                # Accumulate losses
                 total_loss += loss.item()
-                
-                if debug and batch_idx % 10 == 0:
-                    print(f'Batch {batch_idx}: Loss = {loss.item():.6f}')
-            
-            return total_loss / len(train_loader)
+                for k in loss_components_sum:
+                    loss_components_sum[k] += batch_components[k]
+        
+        n_batches = len(val_loader)
+        return (total_loss / n_batches, 
+                {k: v / n_batches for k, v in loss_components_sum.items()})
 
-        def validate(model, val_loader, criterion, device):
-            model.eval()
-            total_loss = 0
-            
-            with torch.no_grad():
-                for batch in val_loader:
-                    # Unpack batch
-                    continuous_features, categorical_features, targets = batch
-                    
-                    # Move data to device
-                    continuous_features = continuous_features.to(device)
-                    categorical_features = categorical_features.to(device)
-                    targets = targets.to(device)
-                    
-                    # Forward pass
-                    outputs = model(continuous_features, categorical_features)
-                    
-                    # Calculate loss
-                    loss = criterion(outputs, targets)
-                    
-                    # Accumulate loss
-                    total_loss += loss.item()
-            
-            return total_loss / len(val_loader)
+    # Training loop
+    for epoch in range(start_epoch, num_epochs):
+        if epoch >= max_epochs:
+            print(f"Reached maximum epochs ({max_epochs})")
+            break
 
-        avg_train_loss = train_epoch(model, train_loader, optimizer, F.mse_loss, device, debug)
-        avg_val_loss = validate(model, val_loader, F.mse_loss, device)
+        # Extract loss weights from config
+        loss_weights = config['train_params'].get('loss_weights', {'continuous': 1.0, 'categorical': 1.0})
+
+        avg_train_loss = train_epoch(model, train_loader, optimizer, device, loss_weights, debug)
+        avg_val_loss, val_components = validate(model, val_loader, device, loss_weights)
 
         train_losses.append(avg_train_loss)
         val_losses.append(avg_val_loss)
+        
+        # Track component losses
+        for k in val_components:
+            val_loss_components[k].append(val_components[k])
+
+        # Log training progress with component breakdowns
+        print(f'Epoch {epoch:3d} | '
+              f'Train Loss: {avg_train_loss:.6f} | '
+              f'Val Loss: {avg_val_loss:.6f} | '
+              f'Val Continuous: {val_components["continuous"]:.6f} | '
+              f'Val Categorical: {val_components["categorical"]:.6f}')
 
         # Track the checkpoint for the current subset
         epochs_in_subset = epoch - current_subset_start_epoch + 1
@@ -299,9 +357,11 @@ def train_model(
                 },
                 training_history={
                     'train_losses': train_losses,
-                    'val_losses': val_losses
+                    'val_losses': val_losses,
+                    'val_continuous_losses': val_loss_components['continuous'],
+                    'val_categorical_losses': val_loss_components['categorical']
                 },
-                timestamp=pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
+                timestamp=datetime.now().strftime('%Y-%m-%d_%H-%M-%S'),
                 trained_subsets=trained_subsets
             )
             
@@ -387,25 +447,12 @@ def train_model(
                 train_cycle += 1
                 trained_subsets.append(next_train_subset)
                 
-                # Move to next validation subset if available
-                if validation_cycler and validation_cycler.has_more_subsets():
-                    print(f"Switching to next validation subset")
-                    next_val_subset = validation_cycler.next_subset()
-                    val_cycle += 1
-                elif validation_cycler:
-                    print(f"Resetting validation cycler as all subsets have been used")
-                    validation_cycler.reset()
-                    next_val_subset = validation_cycler.get_current_subset()
-                    val_cycle += 1
-                else:
-                    next_val_subset = None
-                
                 # Create new dataloaders with updated subsets
                 train_loader, val_loader = create_subset_dataloaders(
                     train_df=train_df,
                     val_df=val_df,
                     train_tickers=next_train_subset,
-                    val_tickers=next_val_subset,
+                    val_tickers=validation_cycler.get_current_subset() if validation_cycler else None,
                     config=config,
                     debug=debug
                 )

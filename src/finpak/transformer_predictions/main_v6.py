@@ -1,13 +1,11 @@
 import re, os, torch, argparse
-from data_loading import create_dataloaders
-from timeseries_decoder_v4 import TimeSeriesDecoder
-from train import train_model
+from data_loading_v6 import create_dataloaders, create_subset_dataloaders
+from timeseries_decoder_v6 import TimeSeriesDecoder
+from train_v5 import train_model
 import pandas as pd
 from finpak.data.fetchers.yahoo import download_multiple_tickers
-from finpak.transformer_predictions.preprocessing import combine_price_series, normalize_features
+from finpak.transformer_predictions.preprocessing_v6 import combine_price_series, create_stock_features
 from ticker_cycler import TickerCycler
-from data_loading import create_dataloaders, create_subset_dataloaders
-
 from configs import all_configs
 from ticker_configs import train_tickers_v11, val_tickers_v11
 
@@ -69,12 +67,26 @@ if __name__ == "__main__":
     use_momentum = CONFIG['data_params'].get('use_momentum', False)
     momentum_periods = CONFIG['data_params'].get('momentum_periods', [9, 28, 47])
 
-    # Calculate total number of features
-    num_features = len(return_periods) + len(sma_periods)
+    # Calculate number of continuous and categorical features
+    n_continuous = len(return_periods) + len(sma_periods)
     if use_volatility:
-        num_features += len(return_periods)
+        n_continuous += len(return_periods)
     if use_momentum:
-        num_features += len(momentum_periods)
+        n_continuous += len(momentum_periods)
+    
+    # Categorical features from binned returns
+    n_categorical = len(return_periods) if CONFIG['data_params'].get('price_change_bins', None) else 0
+    n_bins = CONFIG['data_params'].get('price_change_bins', {}).get('n_bins', 10)
+
+    # Get loss weights for continuous and categorical predictions
+    loss_weights = {
+        'continuous': CONFIG['train_params'].get('continuous_loss_weight', 1.0),
+        'categorical': CONFIG['train_params'].get('categorical_loss_weight', 1.0)
+    }
+
+    # Calculate number of outputs (one per target period)
+    n_continuous_outputs = len(target_periods)
+    n_categorical_outputs = len(target_periods) if CONFIG['data_params'].get('price_change_bins', None) else None
 
     # Validation cycling parameters
     validation_subset_size = CONFIG['train_params']['validation_subset_size']  # Number of tickers in each validation subset
@@ -82,10 +94,25 @@ if __name__ == "__main__":
 
     DEBUG = False
     MODEL_PARAMS = CONFIG['model_params']
-
-    # Training cycling parameters
-    train_subset_size = CONFIG['train_params']['train_subset_size']
-    train_overlap = CONFIG['train_params']['train_overlap']
+    
+    # Create model
+    model = TimeSeriesDecoder(
+        d_continuous=n_continuous,
+        n_categorical=n_categorical,
+        n_bins=n_bins,
+        d_model=MODEL_PARAMS['d_model'],
+        n_heads=MODEL_PARAMS['n_heads'],
+        n_layers=MODEL_PARAMS['n_layers'],
+        d_ff=MODEL_PARAMS['d_ff'],
+        dropout=MODEL_PARAMS['dropout'],
+        n_continuous_outputs=n_continuous_outputs,
+        n_categorical_outputs=n_categorical_outputs,
+        use_multi_scale=MODEL_PARAMS['use_multi_scale'],
+        use_relative_pos=MODEL_PARAMS['use_relative_pos'],
+        use_hope_pos=MODEL_PARAMS['use_hope_pos'],
+        temporal_scales=MODEL_PARAMS['temporal_scales'],
+        base=10000
+    ).to(device)
 
     # Load or download data
     if os.path.exists(train_df_fname) and os.path.exists(val_df_fname) and not FORCE_RELOAD:
@@ -155,8 +182,8 @@ if __name__ == "__main__":
 
     train_cycler = TickerCycler(
         tickers=train_tickers,
-        subset_size=train_subset_size,
-        overlap_size=train_overlap,
+        subset_size=CONFIG['train_params']['train_subset_size'],
+        overlap_size=CONFIG['train_params']['train_overlap'],
         reverse_tickers=CONFIG['data_params'].get('reverse_tickers', False),
         use_anchor=CONFIG['data_params'].get('use_anchor', False)
     )
@@ -173,13 +200,6 @@ if __name__ == "__main__":
         val_tickers=initial_val_tickers,
         config=CONFIG,
         debug=DEBUG
-    )
-
-    # Initialize model with correct input/output dimensions
-    model = TimeSeriesDecoder(
-        d_input=num_features,
-        n_outputs=len(target_periods),
-        **MODEL_PARAMS,
     )
 
     # Load checkpoint if specified
@@ -232,14 +252,15 @@ if __name__ == "__main__":
                     else:
                         print("No train subset history found, starting from first subset")
                 
-                # Print loaded metadata for debugging
-                print("Loaded checkpoint metadata:")
-                print(f"  - Original config: {metadata.config}")
-                print(f"  - Training loss: {metadata.train_loss}")
-                print(f"  - Validation loss: {metadata.val_loss}")
-                print(f"  - Model parameters: {metadata.model_params}")
-                print(f"  - Saved at: {metadata.timestamp}")
-                print(f"  - Current train subset: {train_cycler.get_current_subset()}")
+                if DEBUG:
+                    print("\nLoaded checkpoint metadata:")
+                    print(f"  - Original config: {metadata.config}")
+                    print(f"  - Training loss: {metadata.train_loss}")
+                    print(f"  - Validation loss: {metadata.val_loss}")
+                    print(f"  - Model parameters: {metadata.model_params}")
+                    print(f"  - Saved at: {metadata.timestamp}")
+                    print(f"  - Current train subset: {train_cycler.get_current_subset()}")
+                    print(f"  - Current validation subset: {validation_cycler.get_current_subset()}")
             
             # Fall back to old format if metadata not found
             except (KeyError, AttributeError) as e:

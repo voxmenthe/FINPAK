@@ -4,8 +4,8 @@ from typing import List, Tuple, Optional
 import numpy as np
 from pathlib import Path
 
-from timeseries_decoder_v3 import TimeSeriesDecoder
-from preprocessing import create_stock_features, normalize_features
+from timeseries_decoder_v6 import TimeSeriesDecoder
+from preprocessing_v6 import create_stock_features, normalize_features
 
 
 def load_model_from_checkpoint(
@@ -174,8 +174,6 @@ def make_autoregressive_prediction(
             
             # Update price sequence based on prediction
             last_price = current_sequence[-1].item()
-            if torch.is_complex(torch.tensor(last_price)):
-                last_price = last_price.real
             
             if use_multi_horizon:
                 # Get predictions for each horizon
@@ -183,10 +181,7 @@ def make_autoregressive_prediction(
                 for i, period in enumerate(return_periods):
                     # Scale down the N-day return to a daily return
                     period_return = pred[0][i].item()
-                    # Use absolute value and preserve sign to prevent complex numbers
-                    abs_return = abs(period_return)
-                    sign = 1 if period_return >= 0 else -1
-                    daily_return = sign * ((1 + abs_return) ** (return_scaling_power/period) - 1)
+                    daily_return = (1 + period_return) ** (return_scaling_power/period) - 1
                     
                     # Apply dampening based on horizon length
                     # Longer horizons get more dampening
@@ -206,15 +201,13 @@ def make_autoregressive_prediction(
                 # Apply stability controls
                 if abs(next_return) > stability_threshold:
                     # Clip extreme predictions while preserving direction
-                    next_return = stability_threshold * (1 if next_return >= 0 else -1)
-                    if debug:
+                    next_return = stability_threshold * (next_return / abs(next_return))
+                if debug:
                         print(f"Return exceeded threshold, clipped to: {next_return:.4f}")
                 
                 # Apply exponential moving average smoothing if enabled
                 if use_ewma_smoothing and len(predictions) > 0:
                     prev_return = (current_sequence[-1] / current_sequence[-2] - 1).item()
-                    if torch.is_complex(torch.tensor(prev_return)):
-                        prev_return = prev_return.real
                     smoothed_return = ewma_alpha * next_return + (1 - ewma_alpha) * prev_return
                     next_return = smoothed_return
                 
@@ -230,7 +223,7 @@ def make_autoregressive_prediction(
                     print(f"Raw return: {next_return:.4f}")
             
             # Calculate next price
-            next_price = float(last_price) * (1 + float(next_return))
+            next_price = last_price * (1 + next_return)
             
             if debug:
                 print(f"\nPrice update:")
@@ -261,12 +254,7 @@ def make_autoregressive_prediction(
                 print(f"Return: {next_return:.4f}")
                 print(f"Price change: {next_price - last_price:.2f}")
             
-            # Ensure we're adding a real number to the sequence
-            next_price = float(next_price)
-            current_sequence = torch.cat([
-                current_sequence,
-                torch.tensor([next_price], dtype=torch.float32, device=device)
-            ])
+            current_sequence = torch.cat([current_sequence, torch.tensor([next_price])])
     
     if debug:
         print(f"\nFinal price: {current_sequence[-1].item():.2f}")

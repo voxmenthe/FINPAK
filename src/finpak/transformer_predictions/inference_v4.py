@@ -4,7 +4,7 @@ from typing import List, Tuple, Optional
 import numpy as np
 from pathlib import Path
 
-from timeseries_decoder_v3 import TimeSeriesDecoder
+from timeseries_decoder_v4 import TimeSeriesDecoder
 from preprocessing import create_stock_features, normalize_features
 
 
@@ -25,10 +25,14 @@ def load_model_from_checkpoint(
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # Initialize model with same architecture
-    model = TimeSeriesDecoder(
-        **model_params,
-        dropout=0.0  # Set to 0 for inference
-    )
+    # Create a copy of model_params to avoid modifying the original
+    model_params = model_params.copy()
+    
+    # Set inference-specific parameters
+    model_params['dropout'] = 0.0  # Set to 0 for inference
+    
+    # Initialize model
+    model = TimeSeriesDecoder(**model_params)
     
     # Load checkpoint
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
@@ -93,7 +97,7 @@ def make_autoregressive_prediction(
     
     # Create initial features
     current_sequence = initial_sequence.clone()
-    sequence_length = model.pos_embedding.shape[1]
+    sequence_length = initial_sequence.shape[0]
     
     with torch.no_grad():
         for step in range(n_steps):
@@ -110,12 +114,15 @@ def make_autoregressive_prediction(
                 print(f"Length: {len(current_sequence)}")
                 print(f"Last price: {current_sequence[-1].item():.4f}")
                 print(f"Last 5 prices: {current_sequence[-5:].tolist()}")
-                print(f"\nFeature stats before normalization:")
+                print("\nFeature diagnostics:")
                 print(f"Shape: {features.shape}")
-                print(f"Mean: {features.mean().item():.4f}")
-                print(f"Std: {features.std().item():.4f}")
-                print(f"Min: {features.min().item():.4f}")
-                print(f"Max: {features.max().item():.4f}")
+                print(f"Contains complex numbers: {torch.is_complex(features)}")
+                print(f"Contains NaN: {torch.isnan(features).any()}")
+                print(f"Contains Inf: {torch.isinf(features).any()}")
+                print(f"Min value: {features.min().item()}")
+                print(f"Max value: {features.max().item()}")
+                print(f"Mean value: {features.mean().item()}")
+                print(f"Std value: {features.std().item()}")
             
             # Normalize features
             features = normalize_features(features)
@@ -140,6 +147,18 @@ def make_autoregressive_prediction(
             
             # Get last sequence_length points
             input_sequence = features[-sequence_length:].unsqueeze(0).to(device)
+            
+            if debug:
+                print("\nDiagnostics for input_sequence:")
+                print(f"Shape: {input_sequence.shape}")
+                print(f"Values: {input_sequence[0].cpu().numpy()}")
+            
+                # Debug: Check for complex numbers
+                if torch.is_complex(input_sequence):
+                    print("Warning: input_sequence contains complex numbers!")
+                    print(f"Complex values found at: {torch.where(torch.imag(input_sequence) != 0)}")
+                    # Convert to real by taking absolute value
+                    input_sequence = torch.abs(input_sequence)
             
             # Make prediction
             pred = model(input_sequence)
@@ -264,7 +283,7 @@ def make_autoregressive_prediction(
             # Ensure we're adding a real number to the sequence
             next_price = float(next_price)
             current_sequence = torch.cat([
-                current_sequence,
+                current_sequence, 
                 torch.tensor([next_price], dtype=torch.float32, device=device)
             ])
     
@@ -464,14 +483,6 @@ def predict_from_checkpoint(
     if use_multi_horizon and horizon_weights is None:
         horizon_weights = [1.0 / len(return_periods)] * len(return_periods)
 
-    if debug:
-        print(f"\nValidating start indices:")
-        print(f"Price series length: {len(price_series)}")
-        print(f"Number of start indices: {len(start_indices)}")
-        print(f"Min start index: {min(start_indices)}")
-        print(f"Max start index: {max(start_indices)}")
-        print(f"Indices exceeding length: {[idx for idx in start_indices if idx >= len(price_series)]}")
-
     # Calculate required warmup period first
     max_lookback = max([
         max(sma_periods) if sma_periods else 0,
@@ -481,6 +492,22 @@ def predict_from_checkpoint(
     ])
 
     total_required_history = sequence_length + max_lookback
+
+    if debug:
+        print(f"\nValidating indices:")
+        print(f"Price series length: {len(price_series)}")
+        if start_indices is not None:
+            print(f"Number of start indices: {len(start_indices)}")
+            print(f"Min start index: {min(start_indices)}")
+            print(f"Max start index: {max(start_indices)}")
+            print(f"Indices exceeding length: {[idx for idx in start_indices if idx >= len(price_series)]}")
+        elif averaged_indices is not None:
+            print(f"Number of averaged index groups: {len(averaged_indices)}")
+            print(f"Total indices: {sum(len(group) for group in averaged_indices)}")
+            for i, group in enumerate(averaged_indices):
+                print(f"Group {i}: {len(group)} indices, range [{min(group)}, {max(group)}]")
+        else:
+            print("No indices provided (both start_indices and averaged_indices are None)")
 
     # Load model
     model = load_model_from_checkpoint(
@@ -503,6 +530,21 @@ def predict_from_checkpoint(
         predictions = []
         for start_idx in valid_indices:
             initial_sequence = price_series[max(0, start_idx - sequence_length - max_lookback):start_idx + 1]
+            
+            if debug:
+                print("\nDiagnostics for initial sequence:")
+                print(f"Length: {len(initial_sequence)}")
+                print(f"Tensor type: {initial_sequence.dtype}")
+                print(f"Contains complex numbers: {torch.is_complex(initial_sequence)}")
+                if torch.is_complex(initial_sequence):
+                    print("WARNING: Initial sequence contains complex numbers!")
+                    print(f"First complex number found at index: {torch.where(torch.is_complex(initial_sequence))[0][0].item()}")
+                    complex_vals = initial_sequence[torch.where(torch.is_complex(initial_sequence))[0][:5]]
+                    print(f"Sample complex values: {complex_vals.tolist()}")
+                print(f"Start index: {start_idx}")
+                print(f"Sequence range: {max(0, start_idx - sequence_length - max_lookback)} to {start_idx + 1}")
+                print(f"First value: {initial_sequence[0].item():.4f}")
+                print(f"Last value: {initial_sequence[-1].item():.4f}")
             
             true_future = None
             if use_forcing:

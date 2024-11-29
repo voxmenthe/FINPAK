@@ -1,6 +1,6 @@
 import torch
 from typing import List, Optional
-from stock_dataset import StockFeatures
+from stock_dataset_v6 import StockFeatures
 
 
 def calculate_returns(prices: torch.Tensor, period: int, debug: bool = False) -> torch.Tensor:
@@ -28,15 +28,7 @@ def calculate_returns(prices: torch.Tensor, period: int, debug: bool = False) ->
     
     # Add small epsilon to denominator to prevent division by zero
     eps = 1e-8
-    denominator = prices[:-period]
-    # Handle negative prices by using absolute value for denominator
-    # but preserving the sign in the final calculation
-    denominator_sign = torch.sgn(denominator)
-    denominator_abs = torch.abs(denominator) + eps
-    numerator = prices[period:] - prices[:-period]
-    returns = numerator / denominator_abs
-    # Preserve the original sign
-    returns = returns * denominator_sign
+    returns = (prices[period:] - prices[:-period]) / (prices[:-period] + eps)
 
     # Debug: Print intermediate values for first few calculations
     if debug and len(returns) > 0:
@@ -88,6 +80,29 @@ def calculate_sma(prices: torch.Tensor, window: int) -> torch.Tensor:
         sma[i-1] = prices[i-window:i].mean()
     return sma
 
+def create_price_change_bins(returns: torch.Tensor, n_bins: int, min_val: Optional[float] = None, max_val: Optional[float] = None) -> torch.Tensor:
+    """
+    Convert continuous returns into categorical bins
+    
+    Args:
+        returns: Tensor of price returns
+        n_bins: Number of bins to create
+        min_val: Minimum value for binning. If None, uses data minimum
+        max_val: Maximum value for binning. If None, uses data maximum
+    
+    Returns:
+        Tensor of bin indices (0 to n_bins-1)
+    """
+    if min_val is None:
+        min_val = returns.min()
+    if max_val is None:
+        max_val = returns.max()
+    
+    # Add small epsilon to max_val to ensure the maximum value falls into the last bin
+    eps = 1e-8
+    bins = torch.linspace(min_val, max_val + eps, n_bins + 1)
+    return torch.bucketize(returns, bins) - 1  # -1 to make 0-based indexing
+
 def create_stock_features(
     prices: torch.Tensor,
     config: dict,
@@ -95,158 +110,162 @@ def create_stock_features(
 ) -> StockFeatures:
     """
     Create feature matrix and target variables from price series
-
+    
+    Config parameters:
+        - return_periods: List of periods for calculating returns
+        - sma_periods: List of windows for calculating SMAs
+        - target_periods: List of future periods for prediction targets
+        - price_change_bins: Optional dict with keys:
+            - n_bins: Number of bins for price changes
+            - min_val: Optional minimum value for binning
+            - max_val: Optional maximum value for binning
+        - use_volatility: Whether to include volatility features
+        - use_momentum: Whether to include momentum features
+        - momentum_periods: List of periods for momentum features
+        - target_bins: Optional dict with keys:
+            - n_bins: Number of bins for target price changes
+            - min_val: Optional minimum value for binning
+            - max_val: Optional maximum value for binning
+    
     Returns:
         StockFeatures object containing:
-        - features: Tensor of shape (n_samples, n_features)
-        - targets: Tensor of shape (n_samples, n_targets)
-        - feature_names: List of feature names
-        - target_names: List of target names
+        - continuous_features: Tensor of shape (n_samples, n_continuous_features)
+        - categorical_features: Tensor of shape (n_samples, n_categorical_features)
+        - continuous_targets: Tensor of shape (n_samples, n_continuous_targets)
+        - categorical_targets: Optional tensor of shape (n_samples, n_categorical_targets)
+        - continuous_feature_names: List of continuous feature names
+        - categorical_feature_names: List of categorical feature names
+        - continuous_target_names: List of continuous target names
+        - categorical_target_names: Optional list of categorical target names
         - valid_start_idx: Index where features become valid after initialization period
     """
-
     if debug:
         print("\n=== Feature Creation Debug ===")
-        print(f"Input price tensor type: {prices.dtype}")
-        print(f"Contains complex numbers: {torch.is_complex(prices)}")
-        if torch.is_complex(prices):
-            print("WARNING: Input prices contain complex numbers!")
-            print(f"First complex number found at index: {torch.where(torch.is_complex(prices))[0][0].item()}")
-            complex_prices = prices[torch.where(torch.is_complex(prices))[0][:5]]
-            print(f"Sample complex values: {complex_prices.tolist()}")
-        print(f"Input price stats: min={prices.real.min().item():.4f}, max={prices.real.max().item():.4f}")
-        print(f"NaN in prices: {torch.isnan(prices).sum().item()}")
-
-    # Extract parameters from config
-    use_volatility = config['data_params']['use_volatility']
-    use_momentum = config['data_params']['use_momentum']
-    momentum_periods = config['data_params']['momentum_periods']
-    return_periods = config['data_params']['return_periods']
-    sma_periods = config['data_params']['sma_periods']
-    target_periods = config['data_params']['target_periods']
-
-    # Calculate the initialization period needed
-    max_lookback = max([
-        max(sma_periods) if sma_periods else 0,
-        max(momentum_periods) if use_momentum else 0,
-        max(return_periods) if use_volatility else 0,  # For volatility calculation
-        max(return_periods),  # For return features
-        max(target_periods)   # For target calculation
-    ])
-
+        print("Config keys:", config.keys())
+        if 'data_params' in config:
+            print("Data Params:", config['data_params'])
+        else:
+            print("Warning: 'data_params' not found in config")
+        
+    # Initialize lists to store features and their names
+    continuous_features = []
+    categorical_features = []
+    continuous_feature_names = []
+    categorical_feature_names = []
+    
+    # Calculate returns for different periods
+    for period in config['return_periods']:
+        returns = calculate_returns(prices, period, debug)
+        continuous_features.append(returns)
+        continuous_feature_names.append(f'return_{period}d')
+        
+        # If volatility features are enabled, add them
+        if config.get('use_volatility', False):
+            # Calculate rolling standard deviation of returns
+            vol = torch.zeros_like(returns)
+            for i in range(period, len(returns)):
+                window = returns[i-period:i]
+                if len(window) > 1:  # Ensure we have at least 2 points for std
+                    vol[i] = window.std(unbiased=True)
+                else:
+                    vol[i] = 0.0  # Set to 0 if not enough data points
+            continuous_features.append(vol)
+            continuous_feature_names.append(f'volatility_{period}d')
+        
+        # If price change binning is enabled, add categorical features
+        if 'price_change_bins' in config:
+            # Only bin the 1-day return
+            if period == 1:
+                bin_config = config['price_change_bins']
+                binned_returns = create_price_change_bins(
+                    returns,
+                    n_bins=bin_config['n_bins'],
+                    min_val=bin_config.get('min_val', None),
+                    max_val=bin_config.get('max_val', None)
+                )
+                categorical_features.append(binned_returns)
+                categorical_feature_names.append(f'return_{period}d_bin')
+    
+    # Calculate SMAs
+    for window in config['sma_periods']:
+        sma = calculate_sma(prices, window)
+        continuous_features.append(sma)
+        continuous_feature_names.append(f'sma_{window}d')
+    
+    # Add momentum features if enabled
+    if config.get('use_momentum', False):
+        for period in config.get('momentum_periods', []):
+            momentum = torch.zeros_like(prices)
+            for i in range(period, len(prices)):
+                momentum[i] = (prices[i] - prices[i-period]) / prices[i-period]
+            continuous_features.append(momentum)
+            continuous_feature_names.append(f'momentum_{period}d')
+    
+    # Stack features
+    continuous_tensor = torch.stack(continuous_features, dim=1) if continuous_features else torch.tensor([])
+    categorical_tensor = torch.stack(categorical_features, dim=1) if categorical_features else torch.tensor([])
+    
     if debug:
-        print("\nCreating stock features:")
-        print(f"Price series length: {len(prices)}")
-        print(f"Required initialization period: {max_lookback}")
-        print(f"First few prices: {prices[:5].tolist()}")
-
-    # Ensure we have enough data points
-    if len(prices) <= max_lookback:
-        raise ValueError(f"Price series length ({len(prices)}) must be greater than maximum lookback period ({max_lookback})")
-
-    feature_list = []
-    feature_names = []
-
-    # Calculate return features
-    for period in return_periods:
-        returns = calculate_returns(prices, period)
-        if debug:
-            print(f"\n{period}-day returns:")
-            print(f"Shape: {returns.shape}")
-            print(f"Stats: min={returns.min().item():.4f}, max={returns.max().item():.4f}")
-            print(f"NaN count: {torch.isnan(returns).sum().item()}")
-        feature_list.append(returns)
-        feature_names.append(f'{period}d_return')
-
-    # Calculate SMA features
-    for period in sma_periods:
-        sma = calculate_sma(prices, period)
-        # Calculate percentage difference from SMA
-        sma_diff = (prices - sma) / (sma + 1e-8)  # Add epsilon to prevent division by zero
-        if debug:
-            print(f"\nSMA {period} diff:")
-            print(f"Shape: {sma_diff.shape}")
-            print(f"Stats: min={sma_diff.min().item():.4f}, max={sma_diff.max().item():.4f}")
-            print(f"NaN count: {torch.isnan(sma_diff).sum().item()}")
-        feature_list.append(sma_diff)
-        feature_names.append(f'sma{period}_diff')
-
-    if use_volatility:
-        # Add realized volatility features
-        for period in return_periods:
-            returns = calculate_returns(prices, period)
-            # Use rolling window for volatility calculation
-            volatility = torch.zeros_like(returns)
-
-            # Ensure minimum window size for std calculation
-            min_window = max(5, period // 5)  # Use at least 5 points or 1/5 of period
-
-            for i in range(min_window, len(returns)):
-                # Use unbiased estimator and ensure minimum window size
-                window = returns[max(0, i-period):i]
-                if len(window) >= min_window:
-                    volatility[i] = window.std(unbiased=True)
-
-            if debug:
-                print(f"\n{period}-day volatility:")
-                print(f"Shape: {volatility.shape}")
-                print(f"Stats: min={volatility.min().item():.4f}, max={volatility.max().item():.4f}")
-                print(f"NaN count: {torch.isnan(volatility).sum().item()}")
-
-            feature_list.append(volatility)
-            feature_names.append(f'{period}d_volatility')
-
-    if use_momentum:
-        # Add momentum indicators
-        for period in momentum_periods:
-            momentum = calculate_returns(prices, period)
-            if debug:
-                print(f"\n{period}-day momentum:")
-                print(f"Shape: {momentum.shape}")
-                print(f"Stats: min={momentum.min().item():.4f}, max={momentum.max().item():.4f}")
-                print(f"NaN count: {torch.isnan(momentum).sum().item()}")
-            feature_list.append(momentum)
-            feature_names.append(f'{period}d_momentum')
-
-    # Stack all features first, then slice
-    features = torch.stack(feature_list, dim=1)  # Shape: (n_samples, n_features)
-
+        print(f"\nFeature counts:")
+        print(f"Continuous features: {len(continuous_feature_names)}")
+        print(f"Categorical features: {len(categorical_feature_names)}")
+        print(f"\nContinuous feature names: {continuous_feature_names}")
+        print(f"Categorical feature names: {categorical_feature_names}")
+    
     # Calculate target variables (future returns)
-    target_list = []
-    target_names = []
-
-    for period in target_periods:
+    continuous_target_list = []
+    categorical_target_list = []
+    continuous_target_names = []
+    categorical_target_names = []
+    
+    for period in config['target_periods']:
+        # Calculate continuous future returns
         future_returns = calculate_returns(prices, period)
         if debug:
             print(f"\n{period}-day future returns:")
             print(f"Shape: {future_returns.shape}")
             print(f"Stats: min={future_returns.min().item():.4f}, max={future_returns.max().item():.4f}")
             print(f"NaN count: {torch.isnan(future_returns).sum().item()}")
-        target_list.append(future_returns)
-        target_names.append(f'{period}d_future_return')
-
-    targets = torch.stack(target_list, dim=1)  # Shape: (n_samples, n_targets)
-
-    # Now slice both features and targets after stacking
-    features = features[max_lookback:]
-    targets = targets[max_lookback:]
-
-    if debug:
-        print("\n=== Final Feature Stats ===")
-        print(f"Features shape: {features.shape}")
-        print(f"Features stats: min={features.min().item():.4f}, max={features.max().item():.4f}")
-        print(f"NaN in features: {torch.isnan(features).sum().item()}")
-        print(f"Targets shape: {targets.shape}")
-        print(f"Targets stats: min={targets.min().item():.4f}, max={targets.max().item():.4f}")
-        print(f"NaN in targets: {torch.isnan(targets).sum().item()}")
-
-    # Create StockFeatures object with valid_start_idx
+        continuous_target_list.append(future_returns)
+        continuous_target_names.append(f'future_return_{period}d')
+        
+        # If target binning is enabled, create categorical targets
+        if 'target_bins' in config:
+            bin_config = config['target_bins']
+            binned_returns = create_price_change_bins(
+                future_returns,
+                n_bins=bin_config['n_bins'],
+                min_val=bin_config.get('min_val', None),
+                max_val=bin_config.get('max_val', None)
+            )
+            categorical_target_list.append(binned_returns)
+            categorical_target_names.append(f'future_return_{period}d_bin')
+    
+    # Stack targets
+    continuous_targets = torch.stack(continuous_target_list, dim=1)
+    categorical_targets = torch.stack(categorical_target_list, dim=1) if categorical_target_list else None
+    
+    # Find valid_start_idx (maximum lookback period)
+    lookback_periods = (
+        config['return_periods'] +
+        config['sma_periods'] +
+        (config.get('momentum_periods', []) if config.get('use_momentum', False) else [])
+    )
+    valid_start_idx = max(
+        max(lookback_periods),
+        max(config['target_periods'])
+    )
+    
     return StockFeatures(
-        features=features,  # Shape: (n_samples, n_features)
-        targets=targets,    # Shape: (n_samples, n_targets)
-        feature_names=feature_names,
-        target_names=target_names,
-        valid_start_idx=max_lookback  # Add this field to track where valid data starts
+        continuous_features=continuous_tensor,
+        categorical_features=categorical_tensor,
+        continuous_targets=continuous_targets,
+        categorical_targets=categorical_targets,
+        continuous_feature_names=continuous_feature_names,
+        categorical_feature_names=categorical_feature_names,
+        continuous_target_names=continuous_target_names,
+        categorical_target_names=categorical_target_names if categorical_target_list else None,
+        valid_start_idx=valid_start_idx
     )
 
 
@@ -362,31 +381,14 @@ def normalize_features(features: torch.Tensor, eps: float = 1e-8, debug: bool = 
     # This is fine for normalization purposes
     std = features.std(dim=0, keepdim=True, unbiased=False)
 
-    if debug:
-        print("\nStd calculation diagnostics:")
-        print(f"Contains complex numbers: {torch.is_complex(std)}")
-        print(f"Contains NaN: {torch.isnan(std).any()}")
-        print(f"Contains Inf: {torch.isinf(std).any()}")
-        print(f"Min value: {std.min().item()}")
-        print(f"Max value: {std.max().item()}")
-
     # Replace zero/near-zero std values with 1 to avoid division issues
     std = torch.where(std < eps, torch.ones_like(std), std)
 
     if debug:
         print("\nNormalization parameters:")
-        print(f"Mean shape: {mean.shape}")
-        print(f"Std shape: {std.shape}")
         print(f"Mean: {mean.squeeze().tolist()}")
         print(f"Std: {std.squeeze().tolist()}")
         print(f"Features with std < eps: {(std < eps).sum().item()}")
-
-    # Normalize with additional checks
-    if debug:
-        if torch.any(torch.isnan(mean)) or torch.any(torch.isnan(std)):
-            print("Warning: NaN values in normalization parameters!")
-        if torch.any(torch.isinf(mean)) or torch.any(torch.isinf(std)):
-            print("Warning: Inf values in normalization parameters!")
 
     # Normalize
     normalized = (features - mean) / std
