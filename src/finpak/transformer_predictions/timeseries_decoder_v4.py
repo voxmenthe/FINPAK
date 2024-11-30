@@ -110,60 +110,6 @@ class HoPE(nn.Module):
       return combined.reshape(seq_len, seq_len, self.d_model)
 
 
-class RelativePositionalEncoding(nn.Module):
-    def __init__(self, d_model: int):
-        super().__init__()
-        self.d_model = d_model
-        
-        # Create a small cache of relative position embeddings that we'll expand as needed
-        initial_size = 32  # Start with a small size
-        self.max_cached_len = initial_size
-        self.rel_pos_emb = nn.Parameter(torch.zeros(2 * initial_size - 1, d_model))
-        
-    def _expand_cache(self, new_max_len: int):
-        """Expand the cached relative position embeddings to accommodate longer sequences."""
-        old_max_len = self.max_cached_len
-        device = self.rel_pos_emb.device
-        
-        # Create new larger embedding
-        new_emb = nn.Parameter(torch.zeros(2 * new_max_len - 1, self.d_model, device=device))
-        
-        # Copy old values to center of new embedding
-        old_start = new_max_len - old_max_len
-        new_emb[old_start:old_start + len(self.rel_pos_emb)] = self.rel_pos_emb
-        
-        # Initialize new positions with interpolated values
-        if old_max_len < new_max_len:
-            # Initialize new positions before old values
-            if old_start > 0:
-                new_emb[:old_start] = self.rel_pos_emb[0].unsqueeze(0) + \
-                    (self.rel_pos_emb[0] - self.rel_pos_emb[1]).unsqueeze(0) * \
-                    torch.arange(old_start, 0, -1, device=device).unsqueeze(1)
-            
-            # Initialize new positions after old values
-            remaining = len(new_emb) - (old_start + len(self.rel_pos_emb))
-            if remaining > 0:
-                new_emb[-remaining:] = self.rel_pos_emb[-1].unsqueeze(0) + \
-                    (self.rel_pos_emb[-1] - self.rel_pos_emb[-2]).unsqueeze(0) * \
-                    torch.arange(1, remaining + 1, device=device).unsqueeze(1)
-        
-        self.rel_pos_emb = new_emb
-        self.max_cached_len = new_max_len
-        
-    def forward(self, seq_len: int) -> torch.Tensor:
-        # Expand cache if needed
-        if seq_len > self.max_cached_len:
-            self._expand_cache(seq_len)
-        
-        # Generate relative position matrix
-        positions = torch.arange(seq_len, device=self.rel_pos_emb.device)
-        rel_pos = positions.unsqueeze(1) - positions.unsqueeze(0)
-        rel_pos += self.max_cached_len - 1  # Shift to positive indices
-        
-        # Get embeddings for these positions
-        return self.rel_pos_emb[rel_pos]
-
-
 class CausalSelfAttention(nn.Module):
   def __init__(
       self,
@@ -171,8 +117,6 @@ class CausalSelfAttention(nn.Module):
       n_heads: int,
       dropout: float = 0.1,
       bias: bool = True,
-      use_relative_pos: bool = False,
-      use_hope_pos: bool = False,
       base: int = 10000
   ):
       super().__init__()
@@ -194,13 +138,7 @@ class CausalSelfAttention(nn.Module):
       )
 
       # Positional encoding settings
-      assert not (use_relative_pos and use_hope_pos), "Cannot use both RelativePositionalEncoding and HoPE"
-      self.use_pos_encoding = use_relative_pos or use_hope_pos
-
-      if use_relative_pos:
-          self.pos_enc = RelativePositionalEncoding(d_model)
-      elif use_hope_pos:
-          self.pos_enc = HoPE(d_model, base=base)
+      self.pos_enc = HoPE(d_model, base=base)
 
   def forward(self, x: torch.Tensor) -> torch.Tensor:
       B, T, C = x.shape
@@ -245,8 +183,6 @@ class MultiScaleAttention(nn.Module):
         scales: List[int] = [1, 2, 4],  # Temporal scales
         dropout: float = 0.1,
         bias: bool = True,
-        use_relative_pos: bool = False,
-        use_hope_pos: bool = False,
         base: int = 10000
     ):
         super().__init__()
@@ -259,7 +195,7 @@ class MultiScaleAttention(nn.Module):
         
         # One attention module per scale
         self.attention_modules = nn.ModuleList([
-            CausalSelfAttention(d_model=d_model, n_heads=n_heads, dropout=dropout, bias=bias, use_relative_pos=use_relative_pos, use_hope_pos=use_hope_pos, base=base)
+            CausalSelfAttention(d_model=d_model, n_heads=n_heads, dropout=dropout, bias=bias, base=base)
             for _ in scales
         ])
         
@@ -307,8 +243,6 @@ class DecoderBlock(nn.Module):
         d_ff: int,
         scales: List[int] = [1, 2, 4],
         dropout: float = 0.1,
-        use_relative_pos: bool = False,
-        use_hope_pos: bool = False,
         base: int = 10000
     ):
         super().__init__()
@@ -320,8 +254,6 @@ class DecoderBlock(nn.Module):
             n_heads,
             scales=scales,
             dropout=dropout,
-            use_relative_pos=use_relative_pos,
-            use_hope_pos=use_hope_pos,
             base=base
         )
         self.ln2 = nn.LayerNorm(d_model)
@@ -353,17 +285,13 @@ class TimeSeriesDecoder(nn.Module):
         dropout: float = 0.1,
         n_outputs: int = 2,
         use_multi_scale: bool = False,
-        use_relative_pos: bool = False,
-        use_hope_pos: bool = False,
         temporal_scales: List[int] = [1, 2, 4],
         base: int = 10000
     ):
         super().__init__()
         
         self.input_projection = nn.Linear(d_input, d_model)
-        
-        # We don't need pos_embedding buffer since we're using HoPE in the attention layers
-        # when use_hope_pos is True
+
         
         # Calculate how many unique blocks we need
         # We never reuse first and last blocks, and alternate others
@@ -377,8 +305,6 @@ class TimeSeriesDecoder(nn.Module):
                 d_ff, 
                 scales=temporal_scales if use_multi_scale else [1],
                 dropout=dropout,
-                use_relative_pos=use_relative_pos,
-                use_hope_pos=use_hope_pos,
                 base=base
             )
             for _ in range(n_unique_blocks)
