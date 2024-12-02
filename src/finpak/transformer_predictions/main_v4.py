@@ -9,7 +9,7 @@ from ticker_cycler import TickerCycler
 from data_loading import create_dataloaders, create_subset_dataloaders
 
 from configs import all_configs
-from ticker_configs import train_tickers_v11, val_tickers_v11
+from ticker_configs import train_tickers_v12, val_tickers_v12
 
 
 def get_device():
@@ -45,8 +45,8 @@ if __name__ == "__main__":
 
     checkpoint_dir = 'checkpoints'
 
-    train_tickers = train_tickers_v11
-    val_tickers = val_tickers_v11
+    train_tickers = train_tickers_v12
+    val_tickers = val_tickers_v12
 
     if CONFIG['data_params'].get('reverse_tickers', False):
         train_tickers = train_tickers[::-1]

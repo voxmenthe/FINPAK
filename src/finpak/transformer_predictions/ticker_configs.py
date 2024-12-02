@@ -338,3 +338,47 @@ val_tickers_v11 = [
     'PANW', 'PLTR', 'RDDT', 'RIVN',
     'S', 'SHOP', 'SOFI', 'SNOW', 'TEAM'
 ]
+
+train_tickers_v12 = [
+    'A', 'AAPL', 'AAL', 'ABBV', 'ABNB', 'ABT','ACN', 'ADI', 'ADM', 'ADP',
+    'ADSK', 'AES', 'AFRM', 'AMAT', 'AMD', 'AMGN', 'AMZN', 'ANET', 'ANF', 'ANSS',
+    'APTV', 'AVAV', 'AVGO', 'ADBE', 'ARKK', 'AXP', 'AZN',
+    'BA', 'BABA', 'BBY', 'BIIB', 'BIDU', 'BAC', 'BIIB',
+    'BLDR', 'BLK', 'BKR', 'BMY','BRK-B', 'BSX','BX',
+    'C', 'CAT', 'CCL', 'CDNS', 'CI', 'CL', 'CLX', 'CMG',
+    'COIN', 'COP', 'COST', 'CPRT',
+    'CRM', 'CROX', 'CSCO', 'CSX', 'CVNA', 'CVX', 'CZR',
+    'DAL', 'DASH', 'DG', 'DIS', 'DE', 'DHR', 'DLTR',
+    'EA', 'EBAY', 'ED', 'EEM', 'EFA', 'ETSY',
+    'F', 'FAST', 'FDX', 'FI', 'FICO', 'FMC','FSLR',
+    'GE', 'GILD', 'GIS', 'GM', 'GD', 'GDX', 'GOOGL', 'GS',
+    'H', 'HD', 'HEES', 'HON', 'HPQ',
+    'IBM', 'INTC', 'INTU','ISRG', 'IWM',
+    'JNJ', 'JPM', 'KHC', 'KLAC', 'KO', 'KRE',
+    'LEN', 'LIN', 'LLY', 'LMT', 'LOW','LULU', 'LUV', 'LVS',
+    'MA', 'MCD', 'MELI', 'META', 'MGM', 'MO', 'MRO', 'MRVL', 'MS', 'MSFT', 'MSTR', 'MU',
+    'NCLH', 'NEE', 'NFLX', 'NKE', 'NOW', 'NVDA', 'NVO', 'NXPI',
+    'ON', 'ORCL', 'OXY', 'PANW', 'PAYX', 'PCAR', 'PDD', 'PEP',
+    'PG', 'PGR', 'PM', 'PYPL', 'QCOM', 'QQQ',
+    'REGN', 'RIOT', 'RKLB', 'ROKU',  'ROP', 'ROST', 'RTX',
+    'SBUX', 'SCHW', 'SLB', 'SMCI', 'SMH',
+    'SMTC', 'SNAP', 'SPGI', 'SO', 'SOXX', 'SPY', 'SQQQ', 'SYK',
+    'T', 'TEAM', 'TEVA', 'TGT', 'TMO', 'TMUS', 'TOL', 'TSLA', 'TSM', 'TSX', 'TTD', 'TXN',
+    'UBER', 'UAL', 'UNH', 'UNP', 'UPS', 'V', 'VRTX', 'VZ',
+    'WBA', 'WDAY', 'WFC', 'WMT', 'WYNN',
+    'X', 'XHB', 'XLF', 'XOM', 'ZM'
+]
+
+val_tickers_v12 = [
+    'APP', 'AMT', 'ARM', 'ASML',
+    'CB', 'CEG', 'CRWD', 'CAVA', 'CHTR', 'CLSK',
+    'DDOG', 'DIA', 'DKNG', 'ELV', 'EQIX', 'ETN',
+    'FA', 'FTNT', 'FXI', 'HIMS',
+    'IBIT', 'IBKR', 'ITB', 'IVV',
+    'KDP', 'KKR', 'LIN', 'LYFT',
+    'MARA', 'MDLZ', 'MDT', 'MNST', 'MRK', 'MRNA',
+    'NET', 'NIO', 'NU', 'ORLY',
+    'PANW', 'PLD','PLTR', 'RDDT', 'RIVN',
+    'S', 'SHOP', 'SOFI', 'SNOW',
+    'TEAM', 'TT',
+]

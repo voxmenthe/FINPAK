@@ -9,7 +9,7 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.12,<3.13"
+python = ">=3.12.7,<3.13"
 numpy = ">=2.1.0,<3.0.0"
 pandas = ">=2.2.0,<3.0.0"
 polars = ">=1.9.0,<2.0.0"
@@ -36,6 +36,8 @@ torch = ">=2.5.0,<3.0.0"
 torchvision = "^0.20.0"
 torchaudio = ">=2.5.0,<3.0.0"
 transformers = ">=4.46.3,<5.0.0"
+mlx = "^0.21.0,"
+mlx-lm = "^0.20.1,"
 
 [tool.poetry.dev-dependencies]
 ruff = ">=0.6.0,<0.7.0"

@@ -11,7 +11,7 @@ from ticker_cycler import TickerCycler
 from data_loading import create_dataloaders, create_subset_dataloaders
 
 from configs import all_configs
-from ticker_configs import train_tickers_v10, val_tickers_v10
+from ticker_configs import train_tickers_v12, val_tickers_v12
 
 
 def get_device():

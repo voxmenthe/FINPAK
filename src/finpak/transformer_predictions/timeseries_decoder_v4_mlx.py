@@ -104,9 +104,9 @@ class HoPEMLX(mlx_nn.Module):
             pos_ind = self.position_independent[-latter_dim:]
             
             # Debug print to check dimensions
-            print(f"latter_dim: {latter_dim}")
-            print(f"pos_ind shape: {pos_ind.shape}")
-            print(f"position_independent shape: {self.position_independent.shape}")
+            # print(f"latter_dim: {latter_dim}")
+            # print(f"pos_ind shape: {pos_ind.shape}")
+            # print(f"position_independent shape: {self.position_independent.shape}")
             
             # Create empty tensor for position-independent components
             pos_independent = mx.zeros((seq_len, seq_len, latter_dim, 2))

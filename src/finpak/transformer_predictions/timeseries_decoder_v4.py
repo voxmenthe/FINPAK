@@ -153,15 +153,14 @@ class CausalSelfAttention(nn.Module):
       att = (q @ k.transpose(-2, -1)) / np.sqrt(self.head_dim) # (B, n_heads, T, T)
 
       # Add positional bias to attention scores if using positional encoding
-      if self.use_pos_encoding:
-          pos_bias = self.pos_enc(T)
-          # Reshape to match attention heads
-          pos_bias = pos_bias.view(T, T, self.n_heads, self.head_dim)
-          # Sum over head_dim to get (T, T, n_heads)
-          pos_bias = pos_bias.sum(dim=-1)
-          pos_bias = pos_bias.permute(2, 0, 1)  # (n_heads, T, T)
-          pos_bias = pos_bias.unsqueeze(0) # (1, n_heads, T, T)
-          att = att + pos_bias
+      pos_bias = self.pos_enc(T)
+      # Reshape to match attention heads
+      pos_bias = pos_bias.view(T, T, self.n_heads, self.head_dim)
+      # Sum over head_dim to get (T, T, n_heads)
+      pos_bias = pos_bias.sum(dim=-1)
+      pos_bias = pos_bias.permute(2, 0, 1)  # (n_heads, T, T)
+      pos_bias = pos_bias.unsqueeze(0) # (1, n_heads, T, T)
+      att = att + pos_bias
 
       # Apply causal mask
       att = att.masked_fill(self.mask[:, :, :T, :T], float('-inf'))
