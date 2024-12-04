@@ -7,6 +7,7 @@ from finpak.data.fetchers.yahoo import download_multiple_tickers
 from finpak.transformer_predictions.preprocessing import combine_price_series, normalize_features
 from ticker_cycler import TickerCycler
 from data_loading import create_dataloaders, create_subset_dataloaders
+from datetime import datetime
 
 from configs import all_configs
 from ticker_configs import train_tickers_v12, val_tickers_v12
@@ -25,6 +26,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train transformer model with specified config')
     parser.add_argument('--config', type=str, required=True, help='Configuration version (e.g., vMP004a)')
     parser.add_argument('--checkpoint', type=str, help='Path to checkpoint file to resume training from (optional)')
+    parser.add_argument('--metrics_output', type=str, default='training_metrics.csv', 
+                       help='Path to save training metrics CSV (default: training_metrics.csv)')
     args = parser.parse_args()
 
     # Use this device throughout your code
@@ -52,12 +55,12 @@ if __name__ == "__main__":
         train_tickers = train_tickers[::-1]
         val_tickers = val_tickers[::-1]
 
-    train_df_fname = 'TRAIN_VAL_DATA/train_df_v11.csv'
-    val_df_fname = 'TRAIN_VAL_DATA/val_df_v11.csv'
+    train_df_fname = 'TRAIN_VAL_DATA/train_df_v12.csv'
+    val_df_fname = 'TRAIN_VAL_DATA/val_df_v12.csv'
     FORCE_RELOAD = False
 
-    start_date = '1986-01-01'
-    end_date = '2024-11-27'
+    start_date = '1982-01-01'
+    end_date = '2024-11-30'
 
     # Extract only parameters needed for data loading and model initialization
     batch_size = CONFIG['train_params']['batch_size']
@@ -272,8 +275,14 @@ if __name__ == "__main__":
     print(f"Model size: {sum(p.numel() for p in model.parameters()):,}")
     print(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
+    # Initialize DataFrame to store metrics
+    metrics_df = pd.DataFrame(columns=[
+        'epoch', 'train_loss', 'val_loss', 
+        'train_subset_tickers', 'test_subset_tickers'
+    ])
+
     # Train model with simplified interface
-    train_losses, val_losses = train_model(
+    train_losses, val_losses, metrics_df = train_model(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
@@ -286,5 +295,12 @@ if __name__ == "__main__":
         train_df=train_df,
         val_df=val_df,
         debug=DEBUG,
-        trained_subsets=trained_subsets
+        trained_subsets=trained_subsets,
+        metrics_df=metrics_df
     )
+
+    # Save metrics to CSV
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    metrics_filename = f"{args.metrics_output.rsplit('.', 1)[0]}_{timestamp}.csv"
+    metrics_df.to_csv(metrics_filename, index=False)
+    print(f"Training metrics saved to: {metrics_filename}")

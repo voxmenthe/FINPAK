@@ -1,6 +1,8 @@
 import torch
-from typing import List, Optional
+from typing import List, Optional, Tuple, Union
 from stock_dataset import StockFeatures
+import numpy as np
+from scipy import stats  # For Student-t distribution
 
 
 def calculate_returns(prices: torch.Tensor, period: int, debug: bool = False) -> torch.Tensor:
@@ -250,12 +252,110 @@ def create_stock_features(
     )
 
 
-def combine_price_series(price_series_list: List[torch.Tensor], debug: bool = False) -> torch.Tensor:
+def augment_price_series(
+    price_series: torch.Tensor,
+    t_dist_df: int = 5,
+    scale_factor: float = 0.1,
+    debug: bool = False
+) -> torch.Tensor:
     """
-    Combine multiple price series by normalizing each subsequent series
-    to start where the previous one ended. Only uses data from when each ticker
-    actually starts trading (i.e., has non-zero, non-NaN values).
+    Augment price series by adding noise to daily returns.
+    
+    Args:
+        price_series: Original price series tensor
+        t_dist_df: Degrees of freedom for Student-t distribution
+        scale_factor: Fraction of standard deviation to use for noise
+        debug: Whether to print debug information
+    
+    Returns:
+        Augmented price series tensor
     """
+    # Calculate daily returns
+    daily_returns = (price_series[1:] - price_series[:-1]) / price_series[:-1]
+    
+    # Calculate standard deviation of returns
+    returns_std = torch.std(daily_returns)
+    
+    if debug:
+        print("\nAugmentation Debug:")
+        print(f"Original returns std: {returns_std:.6f}")
+        print(f"First few original returns: {daily_returns[:5].tolist()}")
+    
+    # Generate noise from Student-t distribution
+    noise = torch.tensor(
+        stats.t.rvs(
+            df=t_dist_df,
+            size=len(daily_returns),
+            random_state=None  # Let it use numpy's current random state
+        ),
+        dtype=torch.float32
+    )
+    
+    # Scale noise by specified fraction of standard deviation
+    scaled_noise = noise * returns_std * scale_factor
+    
+    if debug:
+        print(f"Noise std: {torch.std(scaled_noise):.6f}")
+        print(f"First few noise values: {scaled_noise[:5].tolist()}")
+    
+    # Add noise to returns
+    augmented_returns = daily_returns + scaled_noise
+    
+    # Reconstruct price series
+    augmented_prices = torch.zeros_like(price_series)
+    augmented_prices[0] = price_series[0]  # Keep first price unchanged
+    
+    # Reconstruct prices from returns
+    for i in range(len(augmented_returns)):
+        augmented_prices[i + 1] = augmented_prices[i] * (1 + augmented_returns[i])
+    
+    if debug:
+        print("\nPrice series comparison:")
+        print(f"Original first few prices: {price_series[:5].tolist()}")
+        print(f"Augmented first few prices: {augmented_prices[:5].tolist()}")
+        print(f"Relative difference: {((augmented_prices - price_series) / price_series)[:5].tolist()}")
+    
+    return augmented_prices
+
+def combine_price_series(
+    price_series_list: List[torch.Tensor],
+    augmentation_params: Optional[dict] = None,
+    debug: bool = False
+) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    """
+    Combine multiple price series and optionally create augmented version.
+    
+    Args:
+        price_series_list: List of price series tensors
+        augmentation_params: Optional dict with augmentation parameters
+        debug: Whether to print debug information
+    
+    Returns:
+        If augmentation_params is None:
+            Combined price series tensor
+        If augmentation_params is provided:
+            Tuple of (original combined series, augmented combined series)
+    """
+    # Original combination logic
+    combined_series = combine_price_series_base(price_series_list, debug)
+    
+    # If augmentation is not requested, return original series
+    if augmentation_params is None or not augmentation_params.get('enabled', False):
+        return combined_series
+    
+    # Create augmented version
+    augmented_series = augment_price_series(
+        combined_series,
+        t_dist_df=augmentation_params.get('t_dist_df', 5),
+        scale_factor=augmentation_params.get('scale_factor', 0.1),
+        debug=debug
+    )
+    
+    return combined_series, augmented_series
+
+# Rename original combine_price_series to combine_price_series_base
+def combine_price_series_base(price_series_list: List[torch.Tensor], debug: bool = False) -> torch.Tensor:
+    """Original combine_price_series implementation"""
     if not price_series_list:
         raise ValueError("Empty price series list")
 
