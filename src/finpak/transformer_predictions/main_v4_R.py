@@ -1,13 +1,16 @@
 import re, os, torch, argparse
-from data_loading_v5 import create_dataloaders, create_subset_dataloaders
-from timeseries_decoder_v5 import TimeSeriesDecoder
-from train_v5 import train_model
+from data_loading import create_dataloaders
+from timeseries_decoder_v4_R import TimeSeriesDecoder
+from train import train_model
 import pandas as pd
 from finpak.data.fetchers.yahoo import download_multiple_tickers
-from finpak.transformer_predictions.preprocessing_v5 import combine_price_series, create_stock_features
+from finpak.transformer_predictions.preprocessing import combine_price_series, normalize_features
 from ticker_cycler import TickerCycler
+from data_loading import create_dataloaders, create_subset_dataloaders
+from datetime import datetime
+
 from configs import all_configs
-from ticker_configs import train_tickers_v10, val_tickers_v10
+from ticker_configs import train_tickers_v14, val_tickers_v14
 
 
 def get_device():
@@ -23,6 +26,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train transformer model with specified config')
     parser.add_argument('--config', type=str, required=True, help='Configuration version (e.g., vMP004a)')
     parser.add_argument('--checkpoint', type=str, help='Path to checkpoint file to resume training from (optional)')
+    parser.add_argument('--metrics_output', type=str, default='training_metrics.csv', 
+                       help='Path to save training metrics CSV (default: training_metrics.csv)')
     args = parser.parse_args()
 
     # Use this device throughout your code
@@ -43,19 +48,19 @@ if __name__ == "__main__":
 
     checkpoint_dir = 'checkpoints'
 
-    train_tickers = train_tickers_v12
-    val_tickers = val_tickers_v12
+    train_tickers = train_tickers_v14
+    val_tickers = val_tickers_v14
 
     if CONFIG['data_params'].get('reverse_tickers', False):
         train_tickers = train_tickers[::-1]
         val_tickers = val_tickers[::-1]
 
-    train_df_fname = 'TRAIN_VAL_DATA/train_df_v10.csv'
-    val_df_fname = 'TRAIN_VAL_DATA/val_df_v10.csv'
+    train_df_fname = 'TRAIN_VAL_DATA/train_df_v14.csv'
+    val_df_fname = 'TRAIN_VAL_DATA/val_df_v14.csv'
     FORCE_RELOAD = False
 
-    start_date = '1986-01-01'
-    end_date = '2024-11-27'
+    start_date = '1982-01-01'
+    end_date = '2024-12-05'
 
     # Extract only parameters needed for data loading and model initialization
     batch_size = CONFIG['train_params']['batch_size']
@@ -67,15 +72,12 @@ if __name__ == "__main__":
     use_momentum = CONFIG['data_params'].get('use_momentum', False)
     momentum_periods = CONFIG['data_params'].get('momentum_periods', [9, 28, 47])
 
-    # Calculate number of continuous and categorical features
-    n_continuous = len(return_periods) + len(sma_periods)
+    # Calculate total number of features
+    num_features = len(return_periods) + len(sma_periods)
     if use_volatility:
-        n_continuous += len(return_periods)
+        num_features += len(return_periods)
     if use_momentum:
-        n_continuous += len(momentum_periods)
-    
-    # Categorical features from binned returns
-    n_categorical = len(return_periods) if CONFIG['data_params'].get('price_change_bins', None) else 0
+        num_features += len(momentum_periods)
 
     # Validation cycling parameters
     validation_subset_size = CONFIG['train_params']['validation_subset_size']  # Number of tickers in each validation subset
@@ -83,9 +85,10 @@ if __name__ == "__main__":
 
     DEBUG = False
     MODEL_PARAMS = CONFIG['model_params']
-    
-    # Get binning parameters if specified
-    n_bins = CONFIG['data_params'].get('price_change_bins', {}).get('n_bins', 10)
+
+    # Training cycling parameters
+    train_subset_size = CONFIG['train_params']['train_subset_size']
+    train_overlap = CONFIG['train_params']['train_overlap']
 
     # Load or download data
     if os.path.exists(train_df_fname) and os.path.exists(val_df_fname) and not FORCE_RELOAD:
@@ -155,8 +158,8 @@ if __name__ == "__main__":
 
     train_cycler = TickerCycler(
         tickers=train_tickers,
-        subset_size=CONFIG['train_params']['train_subset_size'],
-        overlap_size=CONFIG['train_params']['train_overlap'],
+        subset_size=train_subset_size,
+        overlap_size=train_overlap,
         reverse_tickers=CONFIG['data_params'].get('reverse_tickers', False),
         use_anchor=CONFIG['data_params'].get('use_anchor', False)
     )
@@ -164,6 +167,8 @@ if __name__ == "__main__":
     # Get initial subsets from cyclers
     initial_train_tickers = train_cycler.get_current_subset()
     initial_val_tickers = validation_cycler.get_current_subset()
+    print(f"  - Initial train subset: {initial_train_tickers}")
+    print(f"  - Initial val subset: {initial_val_tickers}")
 
     # Create initial dataloaders
     train_loader, val_loader = create_subset_dataloaders(
@@ -175,23 +180,12 @@ if __name__ == "__main__":
         debug=DEBUG
     )
 
-    # Create model with updated architecture
+    # Initialize model with correct input/output dimensions
     model = TimeSeriesDecoder(
-        d_continuous=n_continuous,
-        n_categorical=n_categorical,
-        n_bins=n_bins,
-        d_model=MODEL_PARAMS['d_model'],
-        n_heads=MODEL_PARAMS['n_heads'],
-        n_layers=MODEL_PARAMS['n_layers'],
-        d_ff=MODEL_PARAMS['d_ff'],
-        dropout=MODEL_PARAMS['dropout'],
+        d_input=num_features,
         n_outputs=len(target_periods),
-        use_multi_scale=MODEL_PARAMS.get('use_multi_scale', False),
-        use_relative_pos=MODEL_PARAMS.get('use_relative_pos', False),
-        use_hope_pos=MODEL_PARAMS.get('use_hope_pos', False),
-        temporal_scales=MODEL_PARAMS.get('temporal_scales', [1, 2, 4]),
-        base=MODEL_PARAMS.get('base', 10000)
-    ).to(device)
+        **MODEL_PARAMS,
+    )
 
     # Load checkpoint if specified
     start_epoch = 0
@@ -243,15 +237,15 @@ if __name__ == "__main__":
                     else:
                         print("No train subset history found, starting from first subset")
                 
-                if DEBUG:
-                    print("\nLoaded checkpoint metadata:")
-                    print(f"  - Original config: {metadata.config}")
-                    print(f"  - Training loss: {metadata.train_loss}")
-                    print(f"  - Validation loss: {metadata.val_loss}")
-                    print(f"  - Model parameters: {metadata.model_params}")
-                    print(f"  - Saved at: {metadata.timestamp}")
-                    print(f"  - Current train subset: {train_cycler.get_current_subset()}")
-                    print(f"  - Current validation subset: {validation_cycler.get_current_subset()}")
+                # Print loaded metadata for debugging
+                print("Loaded checkpoint metadata:")
+                print(f"  - Original config: {metadata.config}")
+                print(f"  - Training loss: {metadata.train_loss}")
+                print(f"  - Validation loss: {metadata.val_loss}")
+                print(f"  - Model parameters: {metadata.model_params}")
+                print(f"  - Saved at: {metadata.timestamp}")
+                print(f"  - Current train subset: {train_cycler.get_current_subset()}")
+                print(f"  - Current val subset: {validation_cycler.get_current_subset()}")
             
             # Fall back to old format if metadata not found
             except (KeyError, AttributeError) as e:
@@ -284,8 +278,14 @@ if __name__ == "__main__":
     print(f"Model size: {sum(p.numel() for p in model.parameters()):,}")
     print(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
+    # Initialize DataFrame to store metrics
+    metrics_df = pd.DataFrame(columns=[
+        'epoch', 'train_loss', 'val_loss', 
+        'train_subset_tickers', 'test_subset_tickers'
+    ])
+
     # Train model with simplified interface
-    train_losses, val_losses = train_model(
+    train_losses, val_losses, metrics_df = train_model(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
@@ -298,5 +298,12 @@ if __name__ == "__main__":
         train_df=train_df,
         val_df=val_df,
         debug=DEBUG,
-        trained_subsets=trained_subsets
+        trained_subsets=trained_subsets,
+        metrics_df=metrics_df
     )
+
+    # Save metrics to CSV
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    metrics_filename = f"{args.metrics_output.rsplit('.', 1)[0]}_{timestamp}.csv"
+    metrics_df.to_csv(metrics_filename, index=False)
+    print(f"Training metrics saved to: {metrics_filename}")

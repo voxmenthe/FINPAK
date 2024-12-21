@@ -133,12 +133,22 @@ def train_model(
     else:
         min_epochs_before_stopping = min_steps_before_stopping // steps_per_epoch
 
-    # Initialize early stopping with the minimum epochs requirement
+    # Get cycle length for early stopping configuration
+    cycle_length = get_cycle_length(config['train_params']['scheduler'])
+    
+    # Initialize early stopping with dynamic patience based on cycle length
+    base_patience = config['train_params']['patience']
+    cycle_based_patience = (cycle_length * 2) + base_patience
+    
+    # Get checkpoint rewinding parameters
+    rewind_quantile_divisions = config['train_params'].get('rewind_quantile_divisions', 10)  # Default to deciles
+    rewind_min_extra_epochs = config['train_params'].get('rewind_min_extra_epochs', 5)  # Minimum extra epochs to prefer longer-trained checkpoint
+    
     early_stop = EarlyStopping(
-        patience=train_params['patience'],
+        patience=cycle_based_patience,  # Use cycle-based patience instead of base patience
         min_delta=min_delta,
         max_checkpoints=train_params['max_checkpoints'],
-        min_epochs=min_epochs_before_stopping
+        min_epochs=max(min_epochs_before_stopping, cycle_length * 2)  # Ensure minimum epochs is at least 2 cycles
     )
     
     # Initialize heap for keeping track of best models (max heap using negative loss)
@@ -349,6 +359,95 @@ def train_model(
                     except OSError as e:
                         print(f"Error deleting old checkpoint {checkpoint_path}: {e}")
 
+    def get_cycle_length(scheduler_config: Dict[str, Any]) -> int:
+        """
+        Get the cycle length in epochs based on scheduler configuration.
+        
+        Args:
+            scheduler_config: The scheduler configuration dictionary
+            
+        Returns:
+            Number of epochs per cycle
+        """
+        scheduler_type = scheduler_config['type']
+        
+        if scheduler_type == "cyclical":
+            return scheduler_config['cycle_params']['cycle_length']
+        elif scheduler_type == "one_cycle":
+            return scheduler_config['warmup_epochs'] * 2  # warmup + cooldown
+        elif scheduler_type == "warmup_decay":
+            # For warmup_decay, consider the period after warmup as one cycle
+            return scheduler_config['warmup_epochs'] * 2
+        
+        return 1  # Default to 1 if unknown scheduler type
+
+    def get_value_quantile(value: float, values: List[float], n_quantiles: int = 10) -> int:
+        """
+        Determine which quantile a value falls into within a distribution.
+        
+        Args:
+            value: The value to check
+            values: List of all values in the distribution
+            n_quantiles: Number of quantiles to divide the distribution into
+            
+        Returns:
+            The quantile index (0 to n_quantiles-1) that the value falls into
+        """
+        if not values:
+            return 0
+        
+        # Calculate quantile boundaries
+        boundaries = [np.quantile(values, q) for q in np.linspace(0, 1, n_quantiles+1)]
+        
+        # Find which quantile the value falls into
+        for i in range(len(boundaries)-1):
+            if boundaries[i] <= value <= boundaries[i+1]:
+                return i
+            
+        return n_quantiles-1  # For any values above the highest boundary
+
+    def select_best_checkpoint(valid_checkpoints: List[Tuple[float, int, str]], 
+                             rewind_quantile_divisions: int,
+                             rewind_min_extra_epochs: int) -> Tuple[float, int, str]:
+        """
+        Select the best checkpoint considering both validation loss and training duration.
+        
+        Args:
+            valid_checkpoints: List of tuples (val_loss, epoch, checkpoint_name)
+            rewind_quantile_divisions: Number of quantiles to divide validation losses into
+            rewind_min_extra_epochs: Minimum extra epochs required to prefer a "good enough" checkpoint
+            
+        Returns:
+            The selected checkpoint tuple (val_loss, epoch, checkpoint_name)
+        """
+        if not valid_checkpoints:
+            raise ValueError("No valid checkpoints provided")
+        
+        # Sort by validation loss to find the best one
+        valid_checkpoints.sort(key=lambda x: x[0])
+        best_checkpoint = valid_checkpoints[0]
+        best_loss, best_epoch, _ = best_checkpoint
+        
+        # Get all validation losses
+        all_losses = [x[0] for x in valid_checkpoints]
+        
+        # Find the quantile of the best loss
+        best_quantile = get_value_quantile(best_loss, all_losses, rewind_quantile_divisions)
+        
+        # Find checkpoints in the same quantile that have trained longer
+        same_quantile_checkpoints = [
+            cp for cp in valid_checkpoints 
+            if get_value_quantile(cp[0], all_losses, rewind_quantile_divisions) == best_quantile
+            and cp[1] > best_epoch + rewind_min_extra_epochs
+        ]
+        
+        if same_quantile_checkpoints:
+            # Among checkpoints in the same quantile that have trained longer,
+            # choose the one with the best validation loss
+            return min(same_quantile_checkpoints, key=lambda x: x[0])
+        
+        return best_checkpoint
+
     # Initialize tracking variables
     current_subset_checkpoints = []
     current_subset_start_epoch = 0
@@ -359,6 +458,44 @@ def train_model(
         # Training
         model.train()
         epoch_loss = 0.0
+        
+        # Check if we need to cycle train/val datasets
+        if train_cycler and not train_cycler.has_more_subsets():
+            print(f"\nResetting train cycler at epoch {epoch}")
+            train_cycler.reset_and_randomize()
+            train_cycle += 1
+            train_cycler.next_subset()
+            
+            # Manage checkpoints for the completed cycle
+            manage_checkpoints(checkpoint_dir, current_subset_checkpoints, best_models, 
+                             train_params['max_checkpoints'], current_cycle=train_cycle)
+            current_subset_checkpoints = []
+            current_subset_start_epoch = epoch
+        
+        if validation_cycler and not validation_cycler.has_more_subsets():
+            print(f"\nResetting validation cycler at epoch {epoch}")
+            validation_cycler.reset()
+            validation_cycler.next_subset()
+        
+        # If either cycler was reset, create new dataloaders
+        if (train_cycler and not train_cycler.has_more_subsets()) or \
+           (validation_cycler and not validation_cycler.has_more_subsets()):
+            train_loader, val_loader = create_subset_dataloaders(
+                train_df=train_df,
+                val_df=val_df,
+                train_tickers=train_cycler.get_current_subset() if train_cycler else None,
+                val_tickers=validation_cycler.get_current_subset() if validation_cycler else None,
+                config=config,
+                debug=debug
+            )
+            
+            # Print current subset information
+            if train_cycler:
+                print(f"\nTrain subset {train_cycler.current_subset_idx + 1}/{len(train_cycler.subsets)}")
+                print(f"Train tickers: {', '.join(train_cycler.get_current_subset())}")
+            if validation_cycler:
+                print(f"Validation subset {validation_cycler.current_subset_idx + 1}/{len(validation_cycler.subsets)}")
+                print(f"Validation tickers: {', '.join(validation_cycler.get_current_subset())}")
         
         for batch_x, batch_y in train_loader:
             if interrupted:
@@ -529,13 +666,15 @@ def train_model(
                     valid_checkpoints = [(loss, ep, name) for loss, ep, name, epochs in current_subset_checkpoints if epochs >= 2]
                     
                     if valid_checkpoints:
-                        # Get the checkpoint with the lowest validation loss
-                        best_loss, best_epoch, best_checkpoint_name = min(valid_checkpoints, key=lambda x: x[0])
-                        print(f"\nRewinding to best checkpoint from current subset:")
-                        print(f"Epoch: {best_epoch}, Val Loss: {best_loss:.7f}")
+                        # Select best checkpoint using new strategy
+                        best_loss, best_epoch, best_name = select_best_checkpoint(
+                            valid_checkpoints,
+                            rewind_quantile_divisions,
+                            rewind_min_extra_epochs
+                        )
+                        print(f"Loading checkpoint for next subset: Epoch {best_epoch}, Loss {best_loss:.7f}")
                         
-                        # Load the best checkpoint
-                        checkpoint = torch.load(os.path.join(checkpoint_dir, best_checkpoint_name))
+                        checkpoint = torch.load(os.path.join(checkpoint_dir, best_name))
                         model.load_state_dict(checkpoint['model_state_dict'])
                         
                         # Important: Move model back to device after loading checkpoint
@@ -568,7 +707,7 @@ def train_model(
                     if enable_validation_cycling:
                         if not validation_cycler.has_more_subsets():
                             print(f"\nResetting validation cycler to beginning as training continues")
-                            validation_cycler.reset()
+                            validation_cycler.reset_and_randomize()
                             val_cycle_completed = True
                         validation_cycler.next_subset()
                     
@@ -608,12 +747,12 @@ def train_model(
                     # Train cycler is exhausted but validation hasn't completed a full cycle
                     # Reset train cycler and continue
                     print(f"\nResetting train cycler to continue validation cycling")
-                    train_cycler.reset()
+                    train_cycler.reset_and_randomize()
                     train_cycle_completed = True
                     train_cycler.next_subset()
                     
                     if not validation_cycler.has_more_subsets():
-                        validation_cycler.reset()
+                        validation_cycler.reset_and_randomize()
                         val_cycle_completed = True
                     validation_cycler.next_subset()
                     
@@ -711,6 +850,32 @@ def train_model(
             print(f"Saved final chkpt: {final_checkpoint_name}")
             break
         
+        # After validation, check if we should move to next subset
+        if train_cycler and train_cycler.has_more_subsets():
+            print(f"\nMoving to next training subset after epoch {epoch}")
+            train_cycler.next_subset()
+            
+            if validation_cycler and validation_cycler.has_more_subsets():
+                validation_cycler.next_subset()
+            
+            # Create new dataloaders with updated subsets
+            train_loader, val_loader = create_subset_dataloaders(
+                train_df=train_df,
+                val_df=val_df,
+                train_tickers=train_cycler.get_current_subset(),
+                val_tickers=validation_cycler.get_current_subset() if validation_cycler else None,
+                config=config,
+                debug=debug
+            )
+            
+            # Print current subset information
+            print(f"\nTrain subset {train_cycler.current_subset_idx + 1}/{len(train_cycler.subsets)}")
+            print(f"Train tickers: {', '.join(train_cycler.get_current_subset())}")
+            if validation_cycler:
+                print(f"Validation subset {validation_cycler.current_subset_idx + 1}/{len(validation_cycler.subsets)}")
+                print(f"Validation tickers: {', '.join(validation_cycler.get_current_subset())}")
+        
+        # Print progress every print_every epochs
         if (epoch + 1) % train_params['print_every'] == 0:
             current_step = epoch * len(train_loader)  # Calculate current step
             print(f"Epoch: {epoch+1}/{n_epochs} (Step: {current_step})")
@@ -718,9 +883,34 @@ def train_model(
             print(f"Validation loss: {val_losses[-1]:.7f}")
             print(f"Learning rate: {scheduler.get_last_lr()[0]:.2e}")
             
-    # At the end of training, print information about best checkpoints
-    print("\nBest checkpoints:")
-    for neg_loss, epoch, cycle in sorted(best_models, reverse=True):
-        print(f"Epoch {epoch}: validation loss = {-neg_loss:.7f}")
-            
+    # Save final checkpoint at end of training
+    metadata = TrainingMetadata(
+        epoch=n_epochs-1,
+        val_loss=val_losses[-1],
+        train_loss=train_losses[-1],
+        train_cycle=train_cycler.current_subset_idx if train_cycler else 0,
+        val_cycle=validation_cycler.current_subset_idx if validation_cycler else 0,
+        config=config,
+        model_params={
+            'total_params': sum(p.numel() for p in model.parameters()),
+            'trainable_params': sum(p.numel() for p in model.parameters() if p.requires_grad),
+        },
+        training_history={
+            'train_losses': train_losses,
+            'val_losses': val_losses,
+        },
+        timestamp=pd.Timestamp.now().isoformat(),
+        trained_subsets=trained_subsets + [train_cycler.get_current_subset()] if train_cycler else []
+    )
+    
+    final_checkpoint = {
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'metadata': metadata
+    }
+    
+    final_checkpoint_name = f"{config['train_params']['prefix']}_final_id_{config['train_params']['run_id']}_arc_{config['train_params']['architecture_version']}_e{n_epochs-1}_valloss_{val_losses[-1]:.7f}.pt"
+    torch.save(final_checkpoint, os.path.join(checkpoint_dir, final_checkpoint_name))
+    print(f"Saved final checkpoint: {final_checkpoint_name}")
+    
     return train_losses, val_losses

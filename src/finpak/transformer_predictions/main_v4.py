@@ -10,7 +10,7 @@ from data_loading import create_dataloaders, create_subset_dataloaders
 from datetime import datetime
 
 from configs import all_configs
-from ticker_configs import train_tickers_v12, val_tickers_v12
+from ticker_configs import train_tickers_v14, val_tickers_v14
 
 
 def get_device():
@@ -48,19 +48,19 @@ if __name__ == "__main__":
 
     checkpoint_dir = 'checkpoints'
 
-    train_tickers = train_tickers_v12
-    val_tickers = val_tickers_v12
+    train_tickers = train_tickers_v14
+    val_tickers = val_tickers_v14
 
     if CONFIG['data_params'].get('reverse_tickers', False):
         train_tickers = train_tickers[::-1]
         val_tickers = val_tickers[::-1]
 
-    train_df_fname = 'TRAIN_VAL_DATA/train_df_v12.csv'
-    val_df_fname = 'TRAIN_VAL_DATA/val_df_v12.csv'
+    train_df_fname = 'TRAIN_VAL_DATA/train_df_v14.csv'
+    val_df_fname = 'TRAIN_VAL_DATA/val_df_v14.csv'
     FORCE_RELOAD = False
 
     start_date = '1982-01-01'
-    end_date = '2024-11-30'
+    end_date = '2024-12-05'
 
     # Extract only parameters needed for data loading and model initialization
     batch_size = CONFIG['train_params']['batch_size']
@@ -167,6 +167,8 @@ if __name__ == "__main__":
     # Get initial subsets from cyclers
     initial_train_tickers = train_cycler.get_current_subset()
     initial_val_tickers = validation_cycler.get_current_subset()
+    print(f"  - Initial train subset: {initial_train_tickers}")
+    print(f"  - Initial val subset: {initial_val_tickers}")
 
     # Create initial dataloaders
     train_loader, val_loader = create_subset_dataloaders(
@@ -243,6 +245,7 @@ if __name__ == "__main__":
                 print(f"  - Model parameters: {metadata.model_params}")
                 print(f"  - Saved at: {metadata.timestamp}")
                 print(f"  - Current train subset: {train_cycler.get_current_subset()}")
+                print(f"  - Current val subset: {validation_cycler.get_current_subset()}")
             
             # Fall back to old format if metadata not found
             except (KeyError, AttributeError) as e:

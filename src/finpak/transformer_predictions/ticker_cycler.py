@@ -114,6 +114,11 @@ class TickerCycler:
     def reset(self):
         """Reset to the first subset."""
         self.current_subset_idx = 0
+
+    def reset_and_randomize(self):
+        # Re-generating the subsets randomizes the order
+        self.subsets = self._generate_subsets()
+        self.current_subset_idx = 0
         
     def has_more_subsets(self) -> bool:
         """Check if there are more unused subsets in the current cycle."""
