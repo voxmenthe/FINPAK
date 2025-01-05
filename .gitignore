@@ -10,3 +10,5 @@ src/data/*
 **/checkpoints/*
 TRAIN_VAL_DATA
 **/*metrics.csv
+creds.py
+**/creds.py

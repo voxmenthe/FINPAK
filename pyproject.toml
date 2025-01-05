@@ -38,6 +38,7 @@ torchaudio = ">=2.5.0,<3.0.0"
 transformers = ">=4.46.3,<5.0.0"
 mlx = "^0.21.0,"
 mlx-lm = "^0.20.1,"
+wandb = "^0.19.1"
 
 [tool.poetry.dev-dependencies]
 ruff = ">=0.6.0,<0.7.0"
