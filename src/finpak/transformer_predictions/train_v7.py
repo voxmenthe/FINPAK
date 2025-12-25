@@ -11,7 +11,6 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from typing import Optional, Dict, Any, List, Tuple
 import pandas as pd
-from torch.optim.lr_scheduler import _LRScheduler
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from data_loading_v7 import create_subset_dataloaders
@@ -22,13 +21,13 @@ import signal
 import sys
 from dataclasses import dataclass
 from torch.serialization import add_safe_globals
-from optimizers import CAdamW
+from torch.optim import AdamW, Muon
 import time
 import shutil
 import glob
 import heapq
 
-OPTIMIZER = CAdamW # torch.optim.AdamW
+
 
 @dataclass
 class TrainingMetadata:
@@ -124,23 +123,56 @@ def train_model(
     max_epochs = train_params.get('max_epochs', float('inf'))
     gradient_clip = train_params.get('gradient_clip', 1.0)
     
-    # Create optimizer with weight decay
-    no_decay = ['bias', 'LayerNorm.weight']
-    optimizer_grouped_parameters = [
-        {
-            'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-            'weight_decay': weight_decay
-        },
-        {
-            'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
-            'weight_decay': 0.0
-        }
-    ]
-    
-    optimizer = OPTIMIZER(optimizer_grouped_parameters, lr=learning_rate)
-    
-    # Initialize scheduler
-    scheduler = get_scheduler(optimizer, config, len(train_loader))
+    def build_optimizers(model, learning_rate, weight_decay, muon_config):
+        no_decay = ['bias', 'LayerNorm.weight']
+        muon_param_names = set()
+        for module_name, module in model.named_modules():
+            if isinstance(module, nn.Linear):
+                for name, _ in module.named_parameters(recurse=False):
+                    if name == 'weight':
+                        full_name = f"{module_name}.{name}" if module_name else name
+                        muon_param_names.add(full_name)
+
+        muon_params = []
+        adamw_decay = []
+        adamw_no_decay = []
+        for name, param in model.named_parameters():
+            if not param.requires_grad:
+                continue
+            if name in muon_param_names:
+                muon_params.append(param)
+            elif any(nd in name for nd in no_decay):
+                adamw_no_decay.append(param)
+            else:
+                adamw_decay.append(param)
+
+        muon_optimizer = None
+        if muon_params:
+            muon_kwargs = {'lr': learning_rate, 'weight_decay': weight_decay}
+            muon_kwargs.update(muon_config)
+            muon_optimizer = Muon(muon_params, **muon_kwargs)
+
+        adamw_optimizer = None
+        if adamw_decay or adamw_no_decay:
+            adamw_groups = []
+            if adamw_decay:
+                adamw_groups.append({'params': adamw_decay, 'weight_decay': weight_decay})
+            if adamw_no_decay:
+                adamw_groups.append({'params': adamw_no_decay, 'weight_decay': 0.0})
+            adamw_optimizer = AdamW(adamw_groups, lr=learning_rate)
+
+        if debug:
+            print(f"Muon params: {sum(p.numel() for p in muon_params):,}")
+            print(f"AdamW params: {sum(p.numel() for p in adamw_decay + adamw_no_decay):,}")
+
+        return muon_optimizer, adamw_optimizer
+
+    muon_config = train_params.get('muon', {})
+    muon_optimizer, adamw_optimizer = build_optimizers(model, learning_rate, weight_decay, muon_config)
+    primary_optimizer = muon_optimizer or adamw_optimizer
+
+    # Initialize scheduler (only applies to the primary optimizer)
+    scheduler = get_scheduler(primary_optimizer, config, len(train_loader)) if primary_optimizer else None
     
     # Initialize early stopping with the minimum epochs requirement
     early_stopping = EarlyStopping(
@@ -217,7 +249,7 @@ def train_model(
             'categorical': categorical_loss.item()
         }
 
-    def train_epoch(model, train_loader, optimizer, device, loss_weights, debug=False):
+    def train_epoch(model, train_loader, muon_optimizer, adamw_optimizer, device, loss_weights, debug=False):
         model.train()
         total_loss = 0
         
@@ -257,7 +289,10 @@ def train_model(
                 targets = targets.to(device)
             
             # Zero gradients
-            optimizer.zero_grad()
+            if muon_optimizer is not None:
+                muon_optimizer.zero_grad()
+            if adamw_optimizer is not None:
+                adamw_optimizer.zero_grad()
             
             # Forward pass
             outputs = model(continuous_features, categorical_features)
@@ -273,7 +308,10 @@ def train_model(
                 torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
             
             # Update weights
-            optimizer.step()
+            if muon_optimizer is not None:
+                muon_optimizer.step()
+            if adamw_optimizer is not None:
+                adamw_optimizer.step()
             
             # Accumulate losses
             total_loss += loss.item()
@@ -330,7 +368,7 @@ def train_model(
         # Extract loss weights from config
         loss_weights = config['train_params'].get('loss_weights', {'continuous': 1.0, 'categorical': 1.0})
 
-        avg_train_loss = train_epoch(model, train_loader, optimizer, device, loss_weights, debug)
+        avg_train_loss = train_epoch(model, train_loader, muon_optimizer, adamw_optimizer, device, loss_weights, debug)
         avg_val_loss, val_components = validate(model, val_loader, device, loss_weights)
 
         train_losses.append(avg_train_loss)
@@ -380,7 +418,10 @@ def train_model(
             checkpoint = {
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
+                'optimizer_state_dict': {
+                    'muon': None if muon_optimizer is None else muon_optimizer.state_dict(),
+                    'adamw': None if adamw_optimizer is None else adamw_optimizer.state_dict(),
+                },
                 'train_loss': avg_train_loss,
                 'val_loss': avg_val_loss,
                 'metadata': metadata
@@ -479,8 +520,12 @@ def train_model(
 
 def get_scheduler(optimizer, config, steps_per_epoch):
     """Create learning rate scheduler based on config."""
-    scheduler_config = config['train_params']['scheduler']
-    scheduler_type = scheduler_config['type']
+    scheduler_config = config['train_params'].get('scheduler')
+    if not scheduler_config:
+        return None
+    scheduler_type = scheduler_config.get('type')
+    if not scheduler_type:
+        return None
     
     if scheduler_type == "cyclical":
         base_lr = scheduler_config['base_lr']
@@ -513,12 +558,14 @@ def get_scheduler(optimizer, config, steps_per_epoch):
         base_lr = scheduler_config['base_lr']
         max_lr = scheduler_config.get('max_lr', base_lr)
         min_lr = scheduler_config.get('min_lr', base_lr / 100)
-        warmup_steps = scheduler_config['warmup_epochs'] * steps_per_epoch
+        warmup_steps = scheduler_config.get('warmup_epochs', 0) * steps_per_epoch
         total_steps = config['train_params']['epochs'] * steps_per_epoch
         
         def lr_lambda(step):
-            if step < warmup_steps:
+            if warmup_steps > 0 and step < warmup_steps:
                 return min_lr + (max_lr - min_lr) * (step / warmup_steps) / base_lr
+            if total_steps <= warmup_steps:
+                return min_lr / base_lr
             else:
                 # Cosine decay from max_lr to min_lr
                 progress = (step - warmup_steps) / (total_steps - warmup_steps)
@@ -529,13 +576,15 @@ def get_scheduler(optimizer, config, steps_per_epoch):
         base_lr = scheduler_config['base_lr']
         max_lr = scheduler_config.get('max_lr', base_lr * 10)
         min_lr = scheduler_config.get('min_lr', base_lr / 10)
-        warmup_steps = scheduler_config['warmup_epochs'] * steps_per_epoch
+        warmup_steps = scheduler_config.get('warmup_epochs', 0) * steps_per_epoch
         total_steps = config['train_params']['epochs'] * steps_per_epoch
         
         def lr_lambda(step):
-            if step < warmup_steps:
+            if warmup_steps > 0 and step < warmup_steps:
                 # Linear warmup
                 return (min_lr + (max_lr - min_lr) * (step / warmup_steps)) / base_lr
+            if total_steps <= warmup_steps:
+                return min_lr / base_lr
             else:
                 # Cosine decay
                 progress = (step - warmup_steps) / (total_steps - warmup_steps)
