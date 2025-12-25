@@ -51,6 +51,7 @@ if __name__ == "__main__":
 
     train_df_fname = 'TRAIN_VAL_DATA/train_df_v11.csv'
     val_df_fname = 'TRAIN_VAL_DATA/val_df_v11.csv'
+    os.makedirs(os.path.dirname(train_df_fname), exist_ok=True)
     FORCE_RELOAD = False
 
     start_date = '1986-01-01'
@@ -170,13 +171,30 @@ if __name__ == "__main__":
     else:
         # Download and process training data
         train_df = download_multiple_tickers(train_tickers, start_date, end_date)
-        train_df = train_df.loc[:,'Adj Close']
+        train_df = train_df.loc[:, 'Adj Close']
+        train_df = train_df.dropna(axis=1, how='all')
+        train_df.index = pd.to_datetime(train_df.index)
+        train_df = train_df.ffill()
+        train_df = train_df.dropna(axis=0, how='any')
         train_df.to_csv(train_df_fname)
         
         # Download and process validation data
         val_df = download_multiple_tickers(val_tickers, start_date, end_date)
-        val_df = val_df.loc[:,'Adj Close']
+        val_df = val_df.loc[:, 'Adj Close']
+        val_df = val_df.dropna(axis=1, how='all')
+        val_df.index = pd.to_datetime(val_df.index)
+        val_df = val_df.ffill()
+        val_df = val_df.dropna(axis=0, how='any')
         val_df.to_csv(val_df_fname)
+
+        missing_train = sorted(set(train_tickers) - set(train_df.columns))
+        missing_val = sorted(set(val_tickers) - set(val_df.columns))
+        if missing_train:
+            print(f"\nRemoving {len(missing_train)} missing tickers from training set")
+            train_tickers = [t for t in train_tickers if t not in missing_train]
+        if missing_val:
+            print(f"\nRemoving {len(missing_val)} missing tickers from validation set")
+            val_tickers = [t for t in val_tickers if t not in missing_val]
 
     # Create cyclers with filtered ticker lists
     validation_cycler = TickerCycler(

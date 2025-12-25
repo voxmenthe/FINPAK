@@ -166,7 +166,7 @@ def download_yahoo_data(symbol, start_date, end_date):
 
 
 
-def download_multiple_tickers(tickers, start_date, end_date, interval='1d'):
+def download_multiple_tickers(tickers, start_date, end_date, interval='1d', auto_adjust=False):
     """
     Download historical data for multiple tickers.
 
@@ -175,11 +175,18 @@ def download_multiple_tickers(tickers, start_date, end_date, interval='1d'):
     start_date (str): The start date in 'YYYY-MM-DD' format.
     end_date (str): The end date in 'YYYY-MM-DD' format.
     interval (str): The data interval (e.g., '1d', '1wk', '1mo').
+    auto_adjust (bool): Whether to return auto-adjusted prices.
 
     Returns:
     pd.DataFrame: The historical data.
     """
-    data = yf.download(tickers, start=start_date, end=end_date, interval=interval)
+    data = yf.download(
+        tickers,
+        start=start_date,
+        end=end_date,
+        interval=interval,
+        auto_adjust=auto_adjust
+    )
     return data
 
 
