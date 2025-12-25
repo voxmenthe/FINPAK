@@ -92,11 +92,12 @@ def download_historical_data(ticker, start_date, end_date, interval='1d', file_f
     Returns:
     pd.DataFrame: The historical data.
     """
-    folder_path = os.path.join(folder_path, ticker)
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
+    ticker_folder_path = os.path.join(folder_path, ticker)
+    if not os.path.exists(ticker_folder_path):
+        os.makedirs(ticker_folder_path)
 
-    existing_data_info = check_existing_data(ticker, '1900-01-01', date.today().strftime('%Y-%m-%d'), interval, file_format, folder_path)
+    # check_existing_data expects the base folder (e.g. data_store), as it appends ticker itself
+    existing_data_info = check_existing_data(ticker, interval, file_format, folder_path)
     
     if existing_data_info:
         existing_start = existing_data_info['start_date']
@@ -104,8 +105,8 @@ def download_historical_data(ticker, start_date, end_date, interval='1d', file_f
         
         # Load existing data
         existing_data = pd.DataFrame()
-        for file_name in os.listdir(folder_path):
-            file_path = os.path.join(folder_path, file_name)
+        for file_name in os.listdir(ticker_folder_path):
+            file_path = os.path.join(ticker_folder_path, file_name)
             if file_format == 'csv' and file_name.endswith('.csv'):
                 data = pd.read_csv(file_path, index_col=0, parse_dates=True)
             elif file_format == 'parquet' and file_name.endswith('.parquet'):
@@ -137,7 +138,7 @@ def download_historical_data(ticker, start_date, end_date, interval='1d', file_f
         updated_data = yf.download(ticker, start=start_date, end=end_date, interval=interval)
     
     if not updated_data.empty:
-        save_data_to_file(updated_data, ticker, file_format, folder_path)
+        save_data_to_file(updated_data, ticker, file_format, ticker_folder_path)
     
     return updated_data.loc[start_date:end_date]
 

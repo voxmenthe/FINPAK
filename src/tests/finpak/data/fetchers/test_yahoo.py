@@ -4,18 +4,17 @@ import pandas as pd
 from datetime import date
 from unittest.mock import patch, MagicMock
 
-from data.fetchers.yahoo import (
+from finpak.data.fetchers.yahoo import (
     download_historical_data,
     download_multiple_tickers,
     save_data_to_file,
-    check_existing_data,
-    update_data_file
+    check_existing_data
 )
 
 
 class TestYahooFetchers(unittest.TestCase):
 
-    @patch('data.fetchers.yahoo.yf.download')
+    @patch('finpak.data.fetchers.yahoo.yf.download')
     def test_download_historical_data(self, mock_download):
         mock_data = pd.DataFrame({
             'Date': pd.date_range(start='2020-01-01', end='2020-01-10'),
@@ -27,7 +26,7 @@ class TestYahooFetchers(unittest.TestCase):
         self.assertIsInstance(data, pd.DataFrame)
         self.assertFalse(data.empty)
 
-    @patch('data.fetchers.yahoo.yf.download')
+    @patch('finpak.data.fetchers.yahoo.yf.download')
     def test_download_multiple_tickers(self, mock_download):
         mock_data = pd.DataFrame({
             'Date': pd.date_range(start='2020-01-01', end='2020-01-10'),
@@ -48,8 +47,7 @@ class TestYahooFetchers(unittest.TestCase):
             'Close': range(10)
         }).set_index('Date')
         save_data_to_file(data, 'AAPL', 'csv')
-        folder_path = os.path.join('data_store', 'AAPL')
-        filename = os.path.join(folder_path, f"{date.today().strftime('%Y-%m-%d')}.csv")
+        filename = os.path.join('data_store', 'AAPL.csv')
         loaded_data = pd.read_csv(filename, index_col=0, parse_dates=True)
         pd.testing.assert_frame_equal(data, loaded_data)
 
@@ -59,29 +57,13 @@ class TestYahooFetchers(unittest.TestCase):
             'Close': range(10)
         }).set_index('Date')
         save_data_to_file(data, 'AAPL', 'parquet')
-        folder_path = os.path.join('data_store', 'AAPL')
-        filename = os.path.join(folder_path, f"{date.today().strftime('%Y-%m-%d')}.parquet")
+        filename = os.path.join('data_store', 'AAPL.parquet')
         loaded_data = pd.read_parquet(filename)
         pd.testing.assert_frame_equal(data, loaded_data)
 
-    @patch('data.fetchers.yahoo.yf.download')
-    def test_update_data_file(self, mock_download):
-        mock_data = pd.DataFrame({
-            'Date': pd.date_range(start='2020-01-01', end='2020-01-10'),
-            'Close': range(10)
-        }).set_index('Date')
-        mock_download.return_value = mock_data
-
-        save_data_to_file(mock_data, 'AAPL', 'csv')
-        update_data_file('AAPL', 'csv')
-        folder_path = os.path.join('data_store', 'AAPL')
-        filename = os.path.join(folder_path, f"{date.today().strftime('%Y-%m-%d')}.csv")
-        updated_data = pd.read_csv(filename, index_col=0, parse_dates=True)
-        self.assertFalse(updated_data.empty)
-
-    @patch('data.fetchers.yahoo.os.path.exists')
-    @patch('data.fetchers.yahoo.os.listdir')
-    @patch('data.fetchers.yahoo.pd.read_csv')
+    @patch('finpak.data.fetchers.yahoo.os.path.exists')
+    @patch('finpak.data.fetchers.yahoo.os.listdir')
+    @patch('finpak.data.fetchers.yahoo.pd.read_csv')
     def test_check_existing_data_csv(self, mock_read_csv, mock_listdir, mock_exists):
         mock_exists.return_value = True
         mock_listdir.return_value = ['2020-01-01.csv']
@@ -91,13 +73,13 @@ class TestYahooFetchers(unittest.TestCase):
         }).set_index('Date')
         mock_read_csv.return_value = mock_data
 
-        existing_data = check_existing_data('AAPL', '2020-01-01', '2020-01-10', '1d', 'csv')
-        self.assertIsInstance(existing_data, pd.DataFrame)
-        self.assertFalse(existing_data.empty)
+        existing_data = check_existing_data('AAPL', '1d', 'csv')
+        self.assertIsInstance(existing_data, dict)
+        self.assertTrue(existing_data)
 
-    @patch('data.fetchers.yahoo.os.path.exists')
-    @patch('data.fetchers.yahoo.os.listdir')
-    @patch('data.fetchers.yahoo.pd.read_parquet')
+    @patch('finpak.data.fetchers.yahoo.os.path.exists')
+    @patch('finpak.data.fetchers.yahoo.os.listdir')
+    @patch('finpak.data.fetchers.yahoo.pd.read_parquet')
     def test_check_existing_data_parquet(self, mock_read_parquet, mock_listdir, mock_exists):
         mock_exists.return_value = True
         mock_listdir.return_value = ['2020-01-01.parquet']
@@ -107,9 +89,9 @@ class TestYahooFetchers(unittest.TestCase):
         }).set_index('Date')
         mock_read_parquet.return_value = mock_data
 
-        existing_data = check_existing_data('AAPL', '2020-01-01', '2020-01-10', '1d', 'parquet')
-        self.assertIsInstance(existing_data, pd.DataFrame)
-        self.assertFalse(existing_data.empty)
+        existing_data = check_existing_data('AAPL', '1d', 'parquet')
+        self.assertIsInstance(existing_data, dict)
+        self.assertTrue(existing_data)
 
 
 if __name__ == '__main__':
