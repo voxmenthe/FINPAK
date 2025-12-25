@@ -1560,6 +1560,53 @@ all_configs = {
         }
     },
 
+    "vMP007a_stability": {
+        "model_params": {
+            "d_model": 384,
+            "n_heads": 16,
+            "n_layers": 24,
+            "d_ff": 912,
+            "dropout": 0.05,
+            "use_multi_scale": False,
+            "use_relative_pos": False,
+            "temporal_scales": [1, 4, 6]
+        },
+        "data_params": {
+            "sequence_length": 32,
+            "return_periods": [1, 2, 3, 4, 5, 8, 13, 26, 36],
+            "sma_periods": [3, 7, 17, 25, 36, 46],
+            "target_periods": [1, 2],
+            "use_volatility": True,
+            "use_momentum": True,
+            "momentum_periods": [4, 9, 15, 21, 37, 46],
+            "reverse_tickers": False
+        },
+        "train_params": {
+            "seed": 6123,
+            "epochs": 2000,
+            "print_every": 10,
+            "batch_size": 64,
+            "patience": 20,
+            "max_checkpoints": 7,
+            "min_delta": 1e-10,
+            "scheduler": {
+                "type": "warmup_decay",
+                "base_lr": 3e-5,
+                "max_lr": 3e-4,
+                "min_lr": 1e-6,
+                "warmup_epochs": 8,
+                "weight_decay": 0.05
+            },
+            "validation_subset_size": 2,
+            "validation_overlap": 1,
+            "train_subset_size": 15,
+            "train_overlap": 3,
+            "prefix": "vMP007a_stability",
+            "architecture_version": "v3",
+            "run_id": "0"
+        }
+    },
+
     "vMP008a": {
         "model_params": {
             "d_model": 512,  # try much longer and shorter sequence lengths,

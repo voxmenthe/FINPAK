@@ -43,10 +43,7 @@ class TrainingMetadata:
     trained_subsets: List[List[str]]
 
 # Register our metadata class as safe for serialization
-add_safe_globals({
-    'TrainingMetadata': TrainingMetadata,
-    'pd.Timestamp': pd.Timestamp
-})
+add_safe_globals([TrainingMetadata, pd.Timestamp])
 
 def seed_everything(seed: int) -> None:
     """
@@ -171,8 +168,16 @@ def train_model(
     muon_optimizer, adamw_optimizer = build_optimizers(model, learning_rate, weight_decay, muon_config)
     primary_optimizer = muon_optimizer or adamw_optimizer
 
-    # Initialize scheduler (only applies to the primary optimizer)
-    scheduler = get_scheduler(primary_optimizer, config, len(train_loader)) if primary_optimizer else None
+    def build_schedulers(muon_optimizer, adamw_optimizer, config, steps_per_epoch):
+        schedulers = {}
+        if muon_optimizer is not None:
+            schedulers['muon'] = get_scheduler(muon_optimizer, config, steps_per_epoch)
+        if adamw_optimizer is not None:
+            schedulers['adamw'] = get_scheduler(adamw_optimizer, config, steps_per_epoch)
+        return schedulers
+
+    # Initialize schedulers (apply to each optimizer if present)
+    schedulers = build_schedulers(muon_optimizer, adamw_optimizer, config, len(train_loader))
     
     # Initialize early stopping with the minimum epochs requirement
     early_stopping = EarlyStopping(
@@ -249,7 +254,7 @@ def train_model(
             'categorical': categorical_loss.item()
         }
 
-    def train_epoch(model, train_loader, muon_optimizer, adamw_optimizer, device, loss_weights, debug=False):
+    def train_epoch(model, train_loader, muon_optimizer, adamw_optimizer, schedulers, device, loss_weights, debug=False):
         model.train()
         total_loss = 0
         
@@ -312,6 +317,11 @@ def train_model(
                 muon_optimizer.step()
             if adamw_optimizer is not None:
                 adamw_optimizer.step()
+            if schedulers:
+                if schedulers.get('muon') is not None:
+                    schedulers['muon'].step()
+                if schedulers.get('adamw') is not None:
+                    schedulers['adamw'].step()
             
             # Accumulate losses
             total_loss += loss.item()
@@ -368,7 +378,7 @@ def train_model(
         # Extract loss weights from config
         loss_weights = config['train_params'].get('loss_weights', {'continuous': 1.0, 'categorical': 1.0})
 
-        avg_train_loss = train_epoch(model, train_loader, muon_optimizer, adamw_optimizer, device, loss_weights, debug)
+        avg_train_loss = train_epoch(model, train_loader, muon_optimizer, adamw_optimizer, schedulers, device, loss_weights, debug)
         avg_val_loss, val_components = validate(model, val_loader, device, loss_weights)
 
         train_losses.append(avg_train_loss)
@@ -509,6 +519,8 @@ def train_model(
                     config=config,
                     debug=debug
                 )
+                # Rebuild schedulers with new steps_per_epoch
+                schedulers = build_schedulers(muon_optimizer, adamw_optimizer, config, len(train_loader))
                 
             else:
                 # If we have no more train subsets but still have val subsets, end training
