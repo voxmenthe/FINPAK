@@ -57,9 +57,11 @@ TICKERS = [
 USE_LOCAL_CSV = False # True
 LOCAL_CSV_PATH = "TRAIN_VAL_DATA/val_df_v11.csv"
 
-N_FUTURE_STEPS = 12
+N_FUTURE_STEPS = 16
 USE_MULTI_HORIZON = True
 PLOT_WINDOW_SIZE = 60
+PREDICTION_OFFSETS = [0, 3, 8]
+SHOW_ACTUAL_FOR_OFFSETS = True
 
 # Optional: override default prediction parameters
 PREDICTION_KWARGS = {
@@ -334,6 +336,7 @@ def plot_forward_prediction(
     prediction_sets,
     offsets_used,
     window_size=180,
+    show_actual_for_offsets=True,
     title="Forward-Looking Prediction",
 ):
     plt.figure(figsize=(14, 7))
@@ -348,50 +351,69 @@ def plot_forward_prediction(
         print("No predictions to plot.")
         return
 
-    aligned_pairs = [
-        (pred, offset)
-        for pred, offset in zip(prediction_sets, offsets_used)
-        if len(pred) > offset
-    ]
-    if not aligned_pairs:
-        print("No aligned predictions to plot.")
-        return
+    pred_series = []
+    for pred_prices, offset in zip(prediction_sets, offsets_used):
+        if len(pred_prices) == 0:
+            continue
+        shifted_start = start_index - offset
+        if shifted_start < 0:
+            continue
+        x_pred = make_future_dates(historical_dates[: shifted_start + 1], len(pred_prices))
+        pred_series.append((x_pred, pred_prices, offset))
 
-    aligned_lengths = [len(pred) - offset for pred, offset in aligned_pairs]
-    common_len = min(aligned_lengths)
-    if common_len <= 0:
-        print("No aligned predictions to plot.")
+    if not pred_series:
+        print("No predictions to plot.")
         return
-
-    x_pred = make_future_dates(historical_dates[: start_index + 1], common_len)
 
     plt.plot(x_hist, y_hist, label="Historical", color="steelblue")
 
-    colors = ["firebrick", "darkorange", "seagreen"]
-    aligned_predictions = []
-    for (pred_prices, offset), color in zip(aligned_pairs, colors):
-        aligned_pred = pred_prices[offset : offset + common_len]
-        aligned_predictions.append(aligned_pred)
+    colors = plt.cm.tab10(np.linspace(0, 1, max(len(pred_series), 1)))
+    for (x_pred, pred_prices, offset), color in zip(pred_series, colors):
         plt.plot(
             x_pred,
-            aligned_pred,
+            pred_prices,
             label=f"Predicted t-{offset}",
             color=color,
             alpha=0.9,
         )
 
-    if aligned_predictions:
-        pred_stack = np.vstack(aligned_predictions)
-        pred_min = pred_stack.min(axis=0)
-        pred_max = pred_stack.max(axis=0)
-        plt.fill_between(
-            x_pred,
-            pred_min,
-            pred_max,
-            color="gray",
-            alpha=0.07,
-            linewidth=0,
-        )
+    if show_actual_for_offsets:
+        valid_offsets = [offset for offset in offsets_used if offset > 0]
+        if valid_offsets:
+            longest_offset = max(valid_offsets)
+            actual_start = max(0, start_index - longest_offset)
+            x_actual = historical_dates[actual_start : start_index + 1]
+            y_actual = historical_prices[actual_start : start_index + 1].cpu().numpy()
+            plt.plot(
+                x_actual,
+                y_actual,
+                label=f"Actual t-{longest_offset}→t-0",
+                color="black",
+                linestyle="--",
+                linewidth=2.0,
+                alpha=0.9,
+                zorder=5,
+            )
+
+    if len(pred_series) > 1:
+        common_dates = None
+        pred_aligned = []
+        for x_pred, pred_prices, _ in pred_series:
+            series = pd.Series(pred_prices, index=pd.DatetimeIndex(x_pred))
+            pred_aligned.append(series)
+            common_dates = series.index if common_dates is None else common_dates.intersection(series.index)
+        if common_dates is not None and len(common_dates) > 0:
+            stacked = np.vstack([series.reindex(common_dates).to_numpy() for series in pred_aligned])
+            pred_min = np.nanmin(stacked, axis=0)
+            pred_max = np.nanmax(stacked, axis=0)
+            plt.fill_between(
+                common_dates,
+                pred_min,
+                pred_max,
+                color="gray",
+                alpha=0.07,
+                linewidth=0,
+            )
 
     plt.axvline(historical_dates[start_index], color="gray", linestyle=":", alpha=0.6)
     plt.title(title)
@@ -424,7 +446,7 @@ for ticker in price_df.columns:
 
     prediction_sets = []
     offsets_used = []
-    for offset in (0, 1, 2):
+    for offset in PREDICTION_OFFSETS:
         if N_FUTURE_STEPS <= offset:
             print(f"Skipping {ticker} offset t-{offset}: N_FUTURE_STEPS too small")
             continue
@@ -458,9 +480,12 @@ for ticker in price_df.columns:
         prediction_sets=prediction_sets,
         offsets_used=offsets_used,
         window_size=PLOT_WINDOW_SIZE,
+        show_actual_for_offsets=SHOW_ACTUAL_FOR_OFFSETS,
         title=f"V7 Forward Prediction: {ticker}",
     )
 
 # %%
 # Optional: inspect last run outputs
 prediction_sets[:1] if 'prediction_sets' in locals() else None
+
+# %%
