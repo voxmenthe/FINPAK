@@ -14,6 +14,7 @@ import torch
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 from finpak.data.fetchers.yahoo import download_multiple_tickers
 from preprocessing_v7 import combine_price_series, create_stock_features
@@ -56,7 +57,7 @@ print("Data params keys:", list(CONFIG["data_params"].keys()))
 # Data loading
 
 START_DATE = "1990-01-01"
-END_DATE = "2024-12-01"
+END_DATE = "2025-12-24"
 TICKERS = val_tickers_v11
 
 USE_LOCAL_CSV = True
@@ -94,13 +95,59 @@ price_df.tail()
 # Build combined price series
 
 price_series_list = []
+date_series_list = []
 for ticker in price_df.columns:
     prices = price_df[ticker]
     price_tensor = torch.tensor(prices.to_numpy(), dtype=torch.float32)
     price_series_list.append(price_tensor)
+    date_series_list.append(prices.index)
 
-combined_prices = combine_price_series(price_series_list)
+def combine_price_series_with_dates(price_series, date_series, debug=False):
+    if not price_series:
+        raise ValueError("Empty price series list")
+
+    cleaned_prices = []
+    cleaned_dates = []
+    for i, series in enumerate(price_series):
+        valid_mask = (series != 0) & torch.isfinite(series)
+        valid_indices = torch.where(valid_mask)[0]
+        if len(valid_indices) == 0:
+            if debug:
+                print(f"\nWarning: Series {i} has no valid values, skipping")
+            continue
+        first_valid_idx = valid_indices[0].item()
+        cleaned_prices.append(series[first_valid_idx:])
+        cleaned_dates.append(date_series[i][first_valid_idx:])
+
+    if not cleaned_prices:
+        raise ValueError("No valid price series after cleaning")
+
+    eps = 1e-8
+    normalized_series = [cleaned_prices[0]]
+    combined_dates = [cleaned_dates[0]]
+
+    for i in range(1, len(cleaned_prices)):
+        current_series = cleaned_prices[i]
+        prev_series_end = normalized_series[-1][-1]
+        scaling_factor = prev_series_end / (current_series[0] + eps)
+        if not torch.isfinite(scaling_factor):
+            if debug:
+                print(f"\nWarning: Invalid scaling factor detected for series {i}")
+            scaling_factor = 1.0
+        normalized_series.append(current_series * scaling_factor)
+        combined_dates.append(cleaned_dates[i])
+
+    combined_series = torch.cat(normalized_series)
+    combined_dates = pd.DatetimeIndex(np.concatenate([d.to_numpy() for d in combined_dates]))
+    return combined_series, combined_dates
+
+
+combined_prices, combined_dates = combine_price_series_with_dates(
+    price_series_list,
+    date_series_list,
+)
 print("Combined prices length:", len(combined_prices))
+print("Combined dates length:", len(combined_dates))
 
 # %%
 # Checkpoints
@@ -120,7 +167,7 @@ if not CHECKPOINT_PATH:
 
 print("Checkpoint path:", CHECKPOINT_PATH)
 # %%
-CHECKPOINT_PATH = ROOT / "checkpoints" / "vMP007a_stability_e58_valloss_0.0004361_tc0_vc0.pt"
+CHECKPOINT_PATH = ROOT / "checkpoints" / "vMP007a_stability_e1142_valloss_0.0000357_tc12_vc0.pt"
 print("Checkpoint path:", CHECKPOINT_PATH)
 
 # %%
@@ -313,6 +360,7 @@ def make_autoregressive_prediction(
 
 def plot_prediction(
     historical_prices,
+    historical_dates,
     start_index,
     predicted_prices,
     window_size=120,
@@ -323,20 +371,23 @@ def plot_prediction(
     hist_start = max(0, start_index - window_size)
     hist_end = start_index + 1
 
-    x_hist = np.arange(hist_start, hist_end)
+    x_hist = historical_dates[hist_start:hist_end]
     y_hist = historical_prices[hist_start:hist_end].cpu().numpy()
 
-    x_pred = np.arange(start_index + 1, start_index + 1 + len(predicted_prices))
+    x_pred = historical_dates[start_index + 1 : start_index + 1 + len(predicted_prices)]
     y_pred = predicted_prices.cpu().numpy()
 
     plt.plot(x_hist, y_hist, label="Historical", color="steelblue")
     plt.plot(x_pred, y_pred, label="Predicted", color="firebrick")
-    plt.axvline(start_index, color="gray", linestyle=":", alpha=0.6)
+    plt.axvline(historical_dates[start_index], color="gray", linestyle=":", alpha=0.6)
     plt.title(title)
-    plt.xlabel("Time Step")
+    plt.xlabel("Date")
     plt.ylabel("Price")
     plt.legend()
     plt.grid(True, alpha=0.2)
+    plt.gca().xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=8))
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter("%y%m%d"))
+    plt.xticks(rotation=35, ha="right")
     plt.tight_layout()
     plt.show()
 
@@ -364,6 +415,7 @@ def run_backtest_predictions(
     config,
     start_indices,
     n_steps,
+    start_offsets=(0, 1, 2),
     use_multi_horizon=True,
     temperature=0.01,
     use_sampling=False,
@@ -376,27 +428,47 @@ def run_backtest_predictions(
     for start_index in start_indices:
         if start_index + n_steps >= len(prices):
             continue
-        pred_returns, pred_prices = make_autoregressive_prediction(
-            model=model,
-            prices=prices,
-            config=config,
-            start_index=start_index,
-            n_steps=n_steps,
-            use_multi_horizon=use_multi_horizon,
-            temperature=temperature,
-            use_sampling=use_sampling,
-            stability_threshold=stability_threshold,
-            dampening_factor=dampening_factor,
-            ewma_alpha=ewma_alpha,
-            return_scaling_power=return_scaling_power,
-        )
+
+        prediction_sets = []
+        offsets_used = []
+        for offset in start_offsets:
+            shifted_start = start_index - offset
+            if shifted_start < 0:
+                continue
+            if shifted_start + n_steps >= len(prices):
+                continue
+            _, pred_prices = make_autoregressive_prediction(
+                model=model,
+                prices=prices,
+                config=config,
+                start_index=shifted_start,
+                n_steps=n_steps,
+                use_multi_horizon=use_multi_horizon,
+                temperature=temperature,
+                use_sampling=use_sampling,
+                stability_threshold=stability_threshold,
+                dampening_factor=dampening_factor,
+                ewma_alpha=ewma_alpha,
+                return_scaling_power=return_scaling_power,
+            )
+            prediction_sets.append(pred_prices.cpu().numpy())
+            offsets_used.append(offset)
+
         actual_future = prices[start_index + 1 : start_index + 1 + n_steps].cpu().numpy()
-        results.append((start_index, pred_prices.cpu().numpy(), actual_future))
+        results.append(
+            {
+                "start_index": start_index,
+                "predictions": prediction_sets,
+                "offsets": offsets_used,
+                "actual_future": actual_future,
+            }
+        )
     return results
 
 
 def plot_backtest_predictions(
     historical_prices,
+    historical_dates,
     results,
     window_size=120,
     title="V7 Backtest Predictions",
@@ -412,23 +484,68 @@ def plot_backtest_predictions(
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, 4 * n_rows), squeeze=False)
     axes = axes.flatten()
 
-    for ax, (start_index, pred_prices, actual_future) in zip(axes, results):
+    for ax, result in zip(axes, results):
+        start_index = result["start_index"]
+        prediction_sets = result["predictions"]
+        offsets_used = result["offsets"]
+        actual_future = result["actual_future"]
         hist_start = max(0, start_index - window_size)
         hist_end = start_index + 1
 
-        x_hist = np.arange(hist_start, hist_end)
+        x_hist = historical_dates[hist_start:hist_end]
         y_hist = historical_prices[hist_start:hist_end].cpu().numpy()
 
-        x_future = np.arange(start_index + 1, start_index + 1 + len(actual_future))
+        if not prediction_sets:
+            continue
+
+        aligned_lengths = [
+            max(0, len(pred) - offset) for pred, offset in zip(prediction_sets, offsets_used)
+        ]
+        common_len = min([len(actual_future)] + aligned_lengths)
+        if common_len <= 0:
+            continue
+
+        x_future = historical_dates[start_index + 1 : start_index + 1 + common_len]
+        actual_future = actual_future[:common_len]
 
         ax.plot(x_hist, y_hist, label="Historical", color="steelblue")
         ax.plot(x_future, actual_future, label="Actual", color="black", linestyle="--", alpha=0.7)
-        ax.plot(x_future, pred_prices, label="Predicted", color="firebrick", alpha=0.9)
-        ax.axvline(start_index, color="gray", linestyle=":", alpha=0.6)
+
+        colors = ["firebrick", "darkorange", "seagreen"]
+        aligned_predictions = []
+        for pred_prices, offset, color in zip(prediction_sets, offsets_used, colors):
+            aligned_pred = pred_prices[offset : offset + common_len]
+            aligned_predictions.append(aligned_pred)
+            ax.plot(
+                x_future,
+                aligned_pred,
+                label=f"Predicted t-{offset}",
+                color=color,
+                alpha=0.9,
+            )
+
+        if aligned_predictions:
+            pred_stack = np.vstack(aligned_predictions)
+            pred_min = pred_stack.min(axis=0)
+            pred_max = pred_stack.max(axis=0)
+            ax.fill_between(
+                x_future,
+                pred_min,
+                pred_max,
+                color="gray",
+                alpha=0.07,
+                linewidth=0,
+            )
+        ax.axvline(historical_dates[start_index], color="gray", linestyle=":", alpha=0.6)
         ax.set_title(f"Start t={start_index}")
-        ax.set_xlabel("Time Step")
+        ax.set_xlabel("Date")
         ax.set_ylabel("Price")
         ax.grid(True, alpha=0.2)
+        ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=6))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%y%m%d"))
+        for tick in ax.get_xticklabels():
+            tick.set_rotation(35)
+            tick.set_horizontalalignment("right")
         ax.legend(fontsize=9)
 
     for ax in axes[len(results):]:
@@ -469,6 +586,7 @@ backtest_results = run_backtest_predictions(
 
 plot_backtest_predictions(
     historical_prices=combined_prices,
+    historical_dates=combined_dates,
     results=backtest_results,
     title="V7 Backtest Predictions (Multiple Start Points)",
 )

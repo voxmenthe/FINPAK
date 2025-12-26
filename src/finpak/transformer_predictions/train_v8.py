@@ -13,7 +13,7 @@ from typing import Optional, Dict, Any, List, Tuple
 import pandas as pd
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
-from data_loading_v7 import create_subset_dataloaders
+from data_loading_v8 import create_subset_dataloaders
 from early_stopping import EarlyStopping
 from ticker_cycler import TickerCycler
 import random
@@ -40,6 +40,9 @@ class TrainingMetadata:
     training_history: Dict[str, List[float]]
     timestamp: str
     trained_subsets: List[List[str]]
+    io_dimensions: Optional[Dict[str, int]] = None
+    previous_io_dimensions: Optional[Dict[str, int]] = None
+    feature_registry: Optional[Dict[str, Optional[List[str]]]] = None
 
 # Register our metadata class as safe for serialization
 add_safe_globals([TrainingMetadata, pd.Timestamp])
@@ -368,6 +371,26 @@ def train_model(
         return (total_loss / n_batches, 
                 {k: v / n_batches for k, v in loss_components_sum.items()})
 
+    io_warmup_epochs = train_params.get('io_warmup_epochs', 0)
+    warmed_up = False
+
+    def set_backbone_trainable(model, trainable: bool) -> None:
+        for name, param in model.named_parameters():
+            if name.startswith("input_embedding.") or name.startswith("continuous_projection") or name.startswith("categorical_projections"):
+                continue
+            param.requires_grad = trainable
+
+    def apply_warmup_state(epoch: int) -> None:
+        nonlocal warmed_up
+        if io_warmup_epochs <= 0:
+            return
+        should_freeze = epoch < (start_epoch + io_warmup_epochs)
+        if should_freeze and not warmed_up:
+            set_backbone_trainable(model, False)
+        if not should_freeze and not warmed_up:
+            set_backbone_trainable(model, True)
+            warmed_up = True
+
     # Training loop
     for epoch in range(start_epoch, num_epochs):
         if epoch >= max_epochs:
@@ -376,6 +399,8 @@ def train_model(
 
         # Extract loss weights from config
         loss_weights = config['train_params'].get('loss_weights', {'continuous': 1.0, 'categorical': 1.0})
+
+        apply_warmup_state(epoch)
 
         avg_train_loss = train_epoch(model, train_loader, muon_optimizer, adamw_optimizer, schedulers, device, loss_weights, debug)
         avg_val_loss, val_components = validate(model, val_loader, device, loss_weights)
@@ -403,26 +428,32 @@ def train_model(
            avg_val_loss < max(c[0] for c in current_subset_checkpoints):
             
             # Create metadata
-            metadata = TrainingMetadata(
-                epoch=epoch,
-                val_loss=avg_val_loss,
-                train_loss=avg_train_loss,
-                train_cycle=train_cycle,
+                io_dimensions = train_params.get('io_dimensions')
+                previous_io_dimensions = train_params.get('previous_io_dimensions')
+                feature_registry = train_params.get('feature_registry')
+                metadata = TrainingMetadata(
+                    epoch=epoch,
+                    val_loss=avg_val_loss,
+                    train_loss=avg_train_loss,
+                    train_cycle=train_cycle,
                 val_cycle=val_cycle,
                 config=config,
                 model_params={
                     'total_params': sum(p.numel() for p in model.parameters()),
                     'trainable_params': sum(p.numel() for p in model.parameters() if p.requires_grad),
                 },
-                training_history={
-                    'train_losses': train_losses,
-                    'val_losses': val_losses,
-                    'val_continuous_losses': val_loss_components['continuous'],
-                    'val_categorical_losses': val_loss_components['categorical']
-                },
-                timestamp=datetime.now().strftime('%Y-%m-%d_%H-%M-%S'),
-                trained_subsets=trained_subsets
-            )
+                    training_history={
+                        'train_losses': train_losses,
+                        'val_losses': val_losses,
+                        'val_continuous_losses': val_loss_components['continuous'],
+                        'val_categorical_losses': val_loss_components['categorical']
+                    },
+                    timestamp=datetime.now().strftime('%Y-%m-%d_%H-%M-%S'),
+                    trained_subsets=trained_subsets,
+                    io_dimensions=io_dimensions,
+                    previous_io_dimensions=previous_io_dimensions,
+                    feature_registry=feature_registry
+                )
             
             checkpoint = {
                 'epoch': epoch,
@@ -479,11 +510,7 @@ def train_model(
                     print(f"Epoch: {best_epoch}, Val Loss: {best_loss:.7f}")
                     
                     # Load the best checkpoint
-                    checkpoint = torch.load(
-                        os.path.join(checkpoint_dir, best_checkpoint_name),
-                        map_location=device,
-                        weights_only=False,  # checkpoint contains more than pure weights
-                    )
+                    checkpoint = torch.load(os.path.join(checkpoint_dir, best_checkpoint_name))
                     model.load_state_dict(checkpoint['model_state_dict'])
                     model = model.to(device)
                     
@@ -656,11 +683,7 @@ def manage_checkpoints(checkpoint_dir: str, current_subset_checkpoints: List[Tup
             # Find and delete its checkpoint
             for f in glob.glob(os.path.join(checkpoint_dir, "*.pt")):
                 try:
-                    checkpoint = torch.load(
-                        f,
-                        map_location='cpu',
-                        weights_only=False,  # checkpoint includes metadata/optimizer state
-                    )
+                    checkpoint = torch.load(f, map_location='cpu')
                     if (checkpoint['metadata'].train_cycle == worst_cycle and 
                         checkpoint['epoch'] == worst_epoch):
                         os.remove(f)
