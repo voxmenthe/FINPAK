@@ -341,17 +341,122 @@ def plot_prediction(
     plt.show()
 
 # %%
-# Run a quick prediction
+# Backtest-style predictions from multiple start points
 
-START_INDEX = len(combined_prices) - 1
+def get_backtest_start_indices(
+    series_length,
+    n_steps,
+    n_windows=6,
+    stride=60,
+    anchor="end",
+):
+    if anchor == "end":
+        last_start = series_length - n_steps - 1
+        starts = [last_start - i * stride for i in range(n_windows)]
+    else:
+        starts = [i * stride for i in range(n_windows)]
+    return [s for s in starts if s >= 0]
+
+
+def run_backtest_predictions(
+    model,
+    prices,
+    config,
+    start_indices,
+    n_steps,
+    use_multi_horizon=True,
+    temperature=0.01,
+    use_sampling=False,
+    stability_threshold=0.1,
+    dampening_factor=0.95,
+    ewma_alpha=0.7,
+    return_scaling_power=1.0,
+):
+    results = []
+    for start_index in start_indices:
+        if start_index + n_steps >= len(prices):
+            continue
+        pred_returns, pred_prices = make_autoregressive_prediction(
+            model=model,
+            prices=prices,
+            config=config,
+            start_index=start_index,
+            n_steps=n_steps,
+            use_multi_horizon=use_multi_horizon,
+            temperature=temperature,
+            use_sampling=use_sampling,
+            stability_threshold=stability_threshold,
+            dampening_factor=dampening_factor,
+            ewma_alpha=ewma_alpha,
+            return_scaling_power=return_scaling_power,
+        )
+        actual_future = prices[start_index + 1 : start_index + 1 + n_steps].cpu().numpy()
+        results.append((start_index, pred_prices.cpu().numpy(), actual_future))
+    return results
+
+
+def plot_backtest_predictions(
+    historical_prices,
+    results,
+    window_size=120,
+    title="V7 Backtest Predictions",
+):
+    if not results:
+        print("No valid backtest windows to plot.")
+        return
+
+    n_plots = len(results)
+    n_cols = 2 if n_plots > 1 else 1
+    n_rows = int(np.ceil(n_plots / n_cols))
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, 4 * n_rows), squeeze=False)
+    axes = axes.flatten()
+
+    for ax, (start_index, pred_prices, actual_future) in zip(axes, results):
+        hist_start = max(0, start_index - window_size)
+        hist_end = start_index + 1
+
+        x_hist = np.arange(hist_start, hist_end)
+        y_hist = historical_prices[hist_start:hist_end].cpu().numpy()
+
+        x_future = np.arange(start_index + 1, start_index + 1 + len(actual_future))
+
+        ax.plot(x_hist, y_hist, label="Historical", color="steelblue")
+        ax.plot(x_future, actual_future, label="Actual", color="black", linestyle="--", alpha=0.7)
+        ax.plot(x_future, pred_prices, label="Predicted", color="firebrick", alpha=0.9)
+        ax.axvline(start_index, color="gray", linestyle=":", alpha=0.6)
+        ax.set_title(f"Start t={start_index}")
+        ax.set_xlabel("Time Step")
+        ax.set_ylabel("Price")
+        ax.grid(True, alpha=0.2)
+        ax.legend(fontsize=9)
+
+    for ax in axes[len(results):]:
+        ax.axis("off")
+
+    fig.suptitle(title, fontsize=14)
+    fig.tight_layout()
+    plt.show()
+
+
 N_FUTURE_STEPS = 30
 USE_MULTI_HORIZON = True
+BACKTEST_WINDOWS = 6
+BACKTEST_STRIDE = 60
 
-pred_returns, pred_prices = make_autoregressive_prediction(
+START_INDICES = get_backtest_start_indices(
+    series_length=len(combined_prices),
+    n_steps=N_FUTURE_STEPS,
+    n_windows=BACKTEST_WINDOWS,
+    stride=BACKTEST_STRIDE,
+    anchor="end",
+)
+
+backtest_results = run_backtest_predictions(
     model=model,
     prices=combined_prices,
     config=CONFIG,
-    start_index=START_INDEX,
+    start_indices=START_INDICES,
     n_steps=N_FUTURE_STEPS,
     use_multi_horizon=USE_MULTI_HORIZON,
     temperature=0.01,
@@ -362,13 +467,12 @@ pred_returns, pred_prices = make_autoregressive_prediction(
     return_scaling_power=1.0,
 )
 
-plot_prediction(
+plot_backtest_predictions(
     historical_prices=combined_prices,
-    start_index=START_INDEX,
-    predicted_prices=pred_prices,
-    title="V7 Prediction (Auto-regressive)",
+    results=backtest_results,
+    title="V7 Backtest Predictions (Multiple Start Points)",
 )
 
 # %%
 # Optional: inspect prediction tensor
-pred_returns[:5]
+backtest_results[:1]
