@@ -371,7 +371,6 @@ if __name__ == "__main__":
         'n_categorical_features': n_categorical,
         'n_bins': n_bins
     }
-    CONFIG['train_params']['feature_registry'] = registry
     if args.io_warmup_epochs is not None:
         CONFIG['train_params']['io_warmup_epochs'] = args.io_warmup_epochs
     else:
@@ -482,6 +481,7 @@ if __name__ == "__main__":
         debug=DEBUG,
         return_registry=True
     )
+    CONFIG['train_params']['feature_registry'] = registry
 
     # Load checkpoint if specified
     start_epoch = 0

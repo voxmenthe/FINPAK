@@ -428,32 +428,32 @@ def train_model(
            avg_val_loss < max(c[0] for c in current_subset_checkpoints):
             
             # Create metadata
-                io_dimensions = train_params.get('io_dimensions')
-                previous_io_dimensions = train_params.get('previous_io_dimensions')
-                feature_registry = train_params.get('feature_registry')
-                metadata = TrainingMetadata(
-                    epoch=epoch,
-                    val_loss=avg_val_loss,
-                    train_loss=avg_train_loss,
-                    train_cycle=train_cycle,
+            io_dimensions = train_params.get('io_dimensions')
+            previous_io_dimensions = train_params.get('previous_io_dimensions')
+            feature_registry = train_params.get('feature_registry')
+            metadata = TrainingMetadata(
+                epoch=epoch,
+                val_loss=avg_val_loss,
+                train_loss=avg_train_loss,
+                train_cycle=train_cycle,
                 val_cycle=val_cycle,
                 config=config,
                 model_params={
                     'total_params': sum(p.numel() for p in model.parameters()),
                     'trainable_params': sum(p.numel() for p in model.parameters() if p.requires_grad),
                 },
-                    training_history={
-                        'train_losses': train_losses,
-                        'val_losses': val_losses,
-                        'val_continuous_losses': val_loss_components['continuous'],
-                        'val_categorical_losses': val_loss_components['categorical']
-                    },
-                    timestamp=datetime.now().strftime('%Y-%m-%d_%H-%M-%S'),
-                    trained_subsets=trained_subsets,
-                    io_dimensions=io_dimensions,
-                    previous_io_dimensions=previous_io_dimensions,
-                    feature_registry=feature_registry
-                )
+                training_history={
+                    'train_losses': train_losses,
+                    'val_losses': val_losses,
+                    'val_continuous_losses': val_loss_components['continuous'],
+                    'val_categorical_losses': val_loss_components['categorical']
+                },
+                timestamp=datetime.now().strftime('%Y-%m-%d_%H-%M-%S'),
+                trained_subsets=trained_subsets,
+                io_dimensions=io_dimensions,
+                previous_io_dimensions=previous_io_dimensions,
+                feature_registry=feature_registry
+            )
             
             checkpoint = {
                 'epoch': epoch,
