@@ -47,6 +47,26 @@ class TrainingMetadata:
 # Register our metadata class as safe for serialization
 add_safe_globals([TrainingMetadata, pd.Timestamp])
 
+def safe_torch_load(load_path, map_location=None, allow_unsafe_fallback=True):
+    safe_globals = []
+    if hasattr(np, "_core") and hasattr(np._core, "multiarray"):
+        safe_globals.append(np._core.multiarray.scalar)
+    if hasattr(np, "dtype"):
+        safe_globals.append(np.dtype)
+    if hasattr(np, "dtypes") and hasattr(np.dtypes, "Float64DType"):
+        safe_globals.append(np.dtypes.Float64DType)
+    try:
+        if safe_globals:
+            with torch.serialization.safe_globals(safe_globals):
+                return torch.load(load_path, map_location=map_location, weights_only=True)
+        return torch.load(load_path, map_location=map_location, weights_only=True)
+    except Exception as e:
+        print(f"Safe checkpoint load failed: {e}")
+        if allow_unsafe_fallback:
+            print("WARNING: Falling back to weights_only=False (unsafe).")
+            return torch.load(load_path, map_location=map_location, weights_only=False)
+        raise
+
 def seed_everything(seed: int) -> None:
     """
     Set random seed for reproducibility across all relevant libraries and systems.
@@ -510,7 +530,7 @@ def train_model(
                     print(f"Epoch: {best_epoch}, Val Loss: {best_loss:.7f}")
                     
                     # Load the best checkpoint
-                    checkpoint = torch.load(os.path.join(checkpoint_dir, best_checkpoint_name))
+                    checkpoint = safe_torch_load(os.path.join(checkpoint_dir, best_checkpoint_name), map_location=device)
                     model.load_state_dict(checkpoint['model_state_dict'])
                     model = model.to(device)
                     
@@ -683,7 +703,7 @@ def manage_checkpoints(checkpoint_dir: str, current_subset_checkpoints: List[Tup
             # Find and delete its checkpoint
             for f in glob.glob(os.path.join(checkpoint_dir, "*.pt")):
                 try:
-                    checkpoint = torch.load(f, map_location='cpu')
+                    checkpoint = safe_torch_load(f, map_location='cpu')
                     if (checkpoint['metadata'].train_cycle == worst_cycle and 
                         checkpoint['epoch'] == worst_epoch):
                         os.remove(f)
