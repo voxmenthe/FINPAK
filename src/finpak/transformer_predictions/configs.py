@@ -1769,7 +1769,7 @@ all_configs = {
             "sequence_length": 24,  # try much longer and shorter sequence lengths
             "return_periods": [1, 2, 3, 4, 5, 8, 13, 26, 36],
             "sma_periods": [3, 7, 17, 25, 36, 46],
-            "target_periods": [1, 2, 4, 6],
+            "target_periods": [1, 2, 4, 6, 9],
             "use_volatility": True,
             "use_momentum": True,
             "momentum_periods": [4, 9, 13, 19, 26, 37, 46],
@@ -1800,7 +1800,7 @@ all_configs = {
             "validation_overlap": 1,
             "train_subset_size": 15, # 16,  # Number of training tickers to use in each subset
             "train_overlap": 3, # 5,       # Number of training tickers to overlap between subsets
-            "prefix": "vMP007b_stability",
+            "prefix": "vMP007b_stability_followon",
             "architecture_version": "v3",
             "run_id": "0"
         }

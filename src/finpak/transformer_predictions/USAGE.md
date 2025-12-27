@@ -93,3 +93,25 @@ Checkpoint arguments:
 # current example
 # checkpoints/vMP007b_stability_e248_valloss_0.0000600_tc10_vc0.pt
 python src/finpak/transformer_predictions/main_v8.py --config vMP007b_stability_followon --checkpoint checkpoints/vMP007b_stability_e248_valloss_0.0000600_tc10_vc0.pt --expand-checkpoint-io --checkpoint-io-init normal --enforce-registry
+
+vMP007b_stability_e467_valloss_0.0002478_tc12_vc0.pt
+python src/finpak/transformer_predictions/main_v8.py --config vMP007b_stability_followon --checkpoint checkpoints/vMP007b_stability_e467_valloss_0.0002478_tc12_vc0.pt --expand-checkpoint-io --checkpoint-io-init normal --enforce-registry
+
+
+## V9
+V9 (categorical feature expansion + v9 configs)
+- V9 uses `configs_v9.py` and the v9 pipeline modules (`preprocessing_v9.py`, `data_loading_v9.py`, `timeseries_decoder_v9.py`, `train_v9.py`).
+- Supports additional categorical features and extra continuous features configured under `data_params.categorical_features` and `data_params.continuous_features_extra`.
+- Registry checks and IO expansion behavior match V8 (append-only feature/target changes are allowed with `--expand-checkpoint-io`).
+
+Examples (V9)
+- Train fresh:
+  - python src/finpak/transformer_predictions/main_v9.py --config v9_stability_base
+- Resume with expanded IO + warmup:
+  - python src/finpak/transformer_predictions/main_v9.py --config v9_stability_followon --checkpoint checkpoints/…pt --expand-checkpoint-io --io-warmup-epochs 3
+- Resume with custom init and registry enforcement:
+  - python src/finpak/transformer_predictions/main_v9.py --config v9_stability_followon --checkpoint checkpoints/…pt --expand-checkpoint-io --checkpoint-io-init normal --enforce-registry
+
+V9 categorical/extra features are defined in config:
+- `data_params.categorical_features`: list of dicts with `type` and params (e.g., `nd_high_low_asym`, `roc_gt_shift`, `roc_lt_shift`)
+- `data_params.continuous_features_extra`: list of dicts with `name` and params (e.g., `dist_from_Nd_high_over_Kd_range`)
